@@ -1,0 +1,30 @@
+{
+  "name": "@ricky-hao/librechat-mcp",
+  "version": "0.1.0",
+  "description": "A small LibreChat administration MCP server for trusted internal agents",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "bin": { "librechat-mcp": "dist/cli.js" },
+  "exports": "./dist/index.js",
+  "files": ["dist", "config.example.json", "README.md", "docs"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js",
+    "prepack": "npm run build"
+  },
+  "repository": { "type": "git", "url": "git+https://github.com/Ricky-Hao/LibreChat-MCP.git" },
+  "publishConfig": { "access": "public" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "26.5.1",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3"
+  }
+}

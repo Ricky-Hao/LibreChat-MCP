@@ -5,6 +5,10 @@ coverage/
 .env.*
 !.env.example
 secrets/
+config.json
+config.*.json
+!config.example.json
+*.tgz
 *.pem
 *.key
 *.log
