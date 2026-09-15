@@ -4,10 +4,11 @@ import type { TestContext } from 'node:test';
 import { configSchema } from '../src/config.js';
 
 export const jwt = 'test-only-upstream-credential';
+export const refreshToken = 'test-only-refresh-cookie';
 export const skillId = '0123456789abcdef01234567';
 export const groupId = '1123456789abcdef01234567';
 export const promptId = '2123456789abcdef01234567';
-export const config = (baseUrl: string) => configSchema.parse({ baseUrl, jwt });
+export const config = (baseUrl: string) => configSchema.parse({ baseUrl, refreshToken });
 export interface Seen { method: string; path: string; body: any; headers: IncomingMessage['headers'] }
 
 export async function listen(t: TestContext, server: Server) {
@@ -16,8 +17,9 @@ export async function listen(t: TestContext, server: Server) {
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }
 
-export async function mockApi(t: TestContext, reply: (r: Seen, res: ServerResponse) => unknown) {
+export async function mockApi(t: TestContext, reply: (r: Seen, res: ServerResponse) => unknown, autoRefresh = true) {
   const seen: Seen[] = [];
+  const authSeen: Seen[] = [];
   const origin = await listen(t, createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
@@ -25,12 +27,19 @@ export async function mockApi(t: TestContext, reply: (r: Seen, res: ServerRespon
     let body: unknown = text;
     try { body = JSON.parse(text); } catch { /* text or multipart */ }
     const request = { method: req.method!, path: req.url!, body, headers: req.headers };
-    seen.push(request);
     res.setHeader('content-type', 'application/json');
-    const data = reply(request, res);
+    if (request.path.endsWith('/api/auth/refresh')) {
+      authSeen.push(request);
+      if (autoRefresh) {
+        res.setHeader('set-cookie', `refreshToken=${refreshToken}; HttpOnly`);
+        res.end(JSON.stringify({ token: jwt })); return;
+      }
+    }
+    seen.push(request);
+    const data = await reply(request, res);
     if (data !== undefined) res.end(JSON.stringify(data));
   }));
-  return { origin, seen };
+  return { origin, seen, authSeen };
 }
 
 export function output(result: any): any {

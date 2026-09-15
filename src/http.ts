@@ -1,10 +1,13 @@
 import { createServer } from 'node:http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createMcpServer } from './server.js';
+import { LibreChatClient } from './client.js';
 import type { Config } from './config.js';
 
-/** Stateless Streamable HTTP: no session store, database, SSE subscription or framework. */
-export function createHttpServer(config: Config) {
+/** Stateless HTTP. Pass a client with refreshTokenWriter for persistence (the CLI does this).
+ * HTTP disconnect cancels that call; cancellation notifications on separate POSTs are not routed.
+ */
+export function createHttpServer(config: Config, api = new LibreChatClient(config)) {
   return createServer(async (req, res) => {
     const path = req.url?.split('?')[0];
     res.setHeader('Content-Type', 'application/json');
@@ -21,7 +24,7 @@ export function createHttpServer(config: Config) {
       res.writeHead(405, { Allow: 'POST' }).end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Method not allowed' } }));
       return;
     }
-    const server = createMcpServer(config);
+    const server = createMcpServer(config, api);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => { void server.close(); });
     try {

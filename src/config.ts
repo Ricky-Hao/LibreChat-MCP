@@ -1,4 +1,6 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile, rename, rm } from 'node:fs/promises';
+import { resolve, dirname, basename, join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 export const configSchema = z.strictObject({
@@ -6,7 +8,7 @@ export const configSchema = z.strictObject({
     const u = new URL(s);
     return ['http:', 'https:'].includes(u.protocol) && !u.username && !u.password && !u.search && !u.hash;
   }, 'baseUrl must be an HTTP(S) URL without credentials, query or fragment'),
-  jwt: z.string().trim().min(1).refine((s) => !/\s/.test(s), 'jwt must be a bare token'),
+  refreshToken: z.string().trim().min(1).refine((s) => !/\s/.test(s), 'refreshToken must be a bare token'),
   transport: z.enum(['http', 'stdio']).default('http'),
   host: z.string().default('127.0.0.1'),
   port: z.number().int().min(0).max(65535).default(3000),
@@ -14,6 +16,21 @@ export const configSchema = z.strictObject({
   timeoutMs: z.number().int().positive().default(30_000),
 });
 export type Config = z.infer<typeof configSchema>;
+
+/** Save only the rotated refresh cookie; access JWTs remain in memory. */
+export function refreshTokenWriter(path: string): (refreshToken: string) => Promise<void> {
+  const target = resolve(path);
+  return async (refreshToken) => {
+    const current = JSON.parse(await readFile(target, 'utf8'));
+    const temporary = join(dirname(target), `.${basename(target)}.${randomUUID()}.tmp`);
+    try {
+      await writeFile(temporary, JSON.stringify({ ...current, refreshToken }, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
+      await rename(temporary, target);
+    } finally {
+      await rm(temporary, { force: true });
+    }
+  };
+}
 
 export async function loadConfig(path: string): Promise<Config> {
   let data: unknown;

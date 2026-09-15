@@ -1,9 +1,25 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { loadConfig } from './config.js';
+import { loadConfig, refreshTokenWriter } from './config.js';
+import { LibreChatClient } from './client.js';
 import { createMcpServer } from './server.js';
 import { createHttpServer } from './http.js';
+
+function onShutdown(api: LibreChatClient, stop: () => void | Promise<void>) {
+  let stopping = false;
+  for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, async () => {
+    if (stopping) return;
+    stopping = true;
+    try {
+      await Promise.all([api.close(), stop()]);
+      process.exit(0);
+    } catch {
+      console.error('Shutdown refresh/save failed. Check writable configuration or obtain a new refreshToken.');
+      process.exit(1);
+    }
+  });
+}
 
 async function main() {
   const { values } = parseArgs({ options: {
@@ -19,22 +35,20 @@ async function main() {
     if (!['http', 'stdio'].includes(values.transport)) throw new Error('transport must be http or stdio');
     config.transport = values.transport as 'http' | 'stdio';
   }
+  const api = new LibreChatClient(config, refreshTokenWriter(values.config!));
   if (config.transport === 'stdio') {
-    const server = createMcpServer(config);
+    const server = createMcpServer(config, api);
     await server.connect(new StdioServerTransport());
-    for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { void server.close().then(() => process.exit(0)); });
+    onShutdown(api, () => server.close());
     return;
   }
-  const server = createHttpServer(config);
+  const server = createHttpServer(config, api);
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(config.port, config.host, resolve);
   });
   console.error(`librechat-mcp listening on port ${(server.address() as { port: number }).port}; ${config.authToken ? 'bearer authentication enabled' : 'NO authentication — trusted network only'}`);
-  for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
-    server.close(() => process.exit(0));
-    setTimeout(() => { server.closeAllConnections(); process.exit(0); }, 5000).unref();
-  });
+  onShutdown(api, () => { server.close(); server.closeAllConnections(); });
 }
 
 main().catch(() => {

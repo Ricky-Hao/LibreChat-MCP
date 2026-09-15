@@ -5,19 +5,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LibreChatClient, ApiError, redact } from '../src/client.js';
 import { loadConfig, configSchema } from '../src/config.js';
-import { mockApi, config, jwt } from './helpers.js';
+import { mockApi, config, jwt, refreshToken } from './helpers.js';
 
 test('JSON configuration, defaults and non-leaking errors', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'librechat-mcp-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const path = join(dir, 'config.json');
   await assert.rejects(loadConfig(path), /Cannot read configuration/);
-  await writeFile(path, JSON.stringify({ baseUrl: 'http://localhost:3080', jwt }));
+  await writeFile(path, JSON.stringify({ baseUrl: 'http://localhost:3080', refreshToken }));
   assert.equal((await loadConfig(path)).transport, 'http');
   assert.equal((await loadConfig(path)).authToken, undefined);
-  assert.equal(configSchema.safeParse({ baseUrl: 'file:///tmp', jwt }).success, false);
-  await writeFile(path, JSON.stringify({ baseUrl: 'http://localhost', jwt: { secret: jwt } }));
-  await assert.rejects(loadConfig(path), (e: Error) => e.message.includes('jwt') && !e.message.includes(jwt));
+  assert.equal(configSchema.safeParse({ baseUrl: 'file:///tmp', refreshToken }).success, false);
+  assert.equal(configSchema.safeParse({ baseUrl: 'http://localhost', jwt }).success, false); // no legacy jwt configuration
+  await writeFile(path, JSON.stringify({ baseUrl: 'http://localhost', refreshToken: { secret: refreshToken } }));
+  await assert.rejects(loadConfig(path), (e: Error) => e.message.includes('refreshToken') && !e.message.includes(refreshToken));
 });
 
 test('generic forwarding supports new routes, query arrays, arbitrary JSON, headers and base prefixes', async (t) => {
@@ -42,17 +43,18 @@ test('absolute external requests are allowed but do not inherit configured JWT; 
   assert.equal(other.seen.length, 1);
 });
 
-test('upstream errors preserve status/conflict; writes are never automatically retried', async (t) => {
+test('upstream errors preserve status/conflict; only explicit 401 writes get one replay', async (t) => {
   for (const status of [401, 403, 404, 409, 429, 500]) {
     const upstream = await mockApi(t, (_r, res) => { res.statusCode = status; return { current: { version: 7 } }; });
     await assert.rejects(new LibreChatClient(config(upstream.origin)).request({ method: 'PATCH', path: '/api/skills/id', body: { expectedVersion: 6 } }), (e: ApiError) => {
       assert.equal(e.status, status);
       assert.deepEqual(e.data, { current: { version: 7 } });
-      if (status === 401) assert.match(e.message, /expired or invalid/);
+      if (status === 401) assert.match(e.message, /rejected after refresh/);
       assert.equal(e.uncertain, status >= 500);
       return true;
     });
-    assert.equal(upstream.seen.length, 1);
+    assert.equal(upstream.seen.length, status === 401 ? 2 : 1);
+    assert.equal(upstream.authSeen.length, status === 401 ? 2 : 1);
   }
 });
 
