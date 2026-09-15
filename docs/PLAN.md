@@ -1,26 +1,29 @@
-# Implementation plan
+# Implementation plan — revised scope
 
-## Scope and authorization
+## Confirmed with the maintainer
 
-- Repository: existing public `Ricky-Hao/LibreChat-MCP`; owner explicitly approved retaining name and visibility. No secrets or production data.
-- Working directory: `/home/ricky/git/LibreChat-MCP`.
-- Target: official `danny-avila/LibreChat` `dev`, pinned to `21a9edbe7481fd4de180b45922a2468fdcf79ea3`. Confirmed using upstream remote and `ls-remote`; inspected an archive of this commit, not the neighboring customized working trees.
-- No production API writes, deployment, Gateway changes or business test resources authorized. Mock tests by default. Gateway integration remains unverified.
+The initial plan was committed as `b903cea` before implementation. The maintainer then revised the scope; this document supersedes its policy-heavy defaults.
 
-## Sequence
+- Existing **public** repository `Ricky-Hao/LibreChat-MCP`; keep its name and visibility.
+- Small trusted-intranet administrator tool, not a public multi-user service.
+- Skills, Agents with Skill bindings, Scheduled Tasks / Cron, Prompt library, visibility/sharing where upstream actually supports it, and run-now.
+- All implemented operations available immediately; no read-only mode, policy engine, method/path allowlist or delete/share/run feature gates.
+- Generic tool forwards requests, including unknown future API routes. It has no administrative restrictions. Configured upstream JWT is only attached to the configured origin; no automatic redirects or retries.
+- JSON configuration containing `baseUrl` and literal `jwt`; no credential-file indirection, login or refresh. Restart to reload.
+- Streamable HTTP without authentication by default; optional separate downstream bearer and stdio.
+- npm CLI/package, GitHub Release package, Docker image. No Gateway implementation, Kubernetes deployment, UI, database or multi-version compatibility framework.
+- Focused mock/protocol tests, not exhaustive defensive test suites. No production test resources.
 
-1. Commit this plan and initial capability matrix before implementation.
-2. Audit route mounts, authentication, input validators, services and model concurrency/deletion behavior; finish matrix with evidence.
-3. Build standalone TypeScript API client, credentials, URL/body limits, operation policy and safe audit/error handling.
-4. Add semantic resource tools and restricted generic tools using official MCP SDK Streamable HTTP. No chat, database access, login or identity impersonation.
-5. Test mock mappings and real MCP initialization/discovery/calls/protocol errors, security boundaries, timeouts and uncertain writes.
-6. Deliver locked dependencies, non-root Docker, Kubernetes examples, authentication/rotation instructions, tested/unsupported/unverified inventory.
+## Upstream reference
 
-## Initial safety decisions
+Official `danny-avila/LibreChat` `dev` was fetched and pinned for this implementation at `21a9edbe7481fd4de180b45922a2468fdcf79ea3`. Source was read from a git archive of that commit, not a customized working tree. This is the source reference, not a promise of perpetual or multi-version compatibility. Generic requests cover unwrapped API changes; normal code updates can track dev as needed.
 
-- Require separate downstream bearer secret; all callers share the single upstream user's permissions. Network isolation and TLS termination required in deployment.
-- Upstream JWT preferably loaded from mounted file, never a tool input. No JWT decoding as authentication, no refresh/login. Fail closed on missing credentials.
-- Default read-only; separate opt-ins for writes, generic writes, deletions, activation and known side-effecting reads. Run-now and sharing remain blocked unless explicitly implemented and audited.
-- Route AND payload rules shared by generic and dedicated operations. No arbitrary-origin forwarding, redirects, sensitive input headers, arbitrary binary proxy or automatic retries.
-- GET `/api/skills` may synchronize GitHub skills. GET `/api/schedules` retries deferred deletion. These are not treated as pure reads.
-- Honest results: preserve upstream versions/conflicts, distinguish policy denial, upstream failure, response size rejection and uncertain mutation. No fake CAS or fabricated success.
+## Implementation
+
+1. Initial route/capability audit and plan committed before code — done.
+2. Audit user JWT, source restrictions, updates, prompt versions, cron and ACL API — done; see API-MATRIX.md.
+3. Minimal independent client + config + semantic tool modules + HTTP/stdio entrypoint — done.
+4. Focused request-mapping and MCP protocol tests — done.
+5. Build/package/container validation and distribution workflows — see STATUS.md.
+
+The authorization remains development/testing/distribution only, not production LibreChat mutations or Gateway deployment. Never commit JWTs, local config, client secrets or production responses.
