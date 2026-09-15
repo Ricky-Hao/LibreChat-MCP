@@ -37,7 +37,16 @@
 - Compatibility with dev commits newer than `21a9edbe7481fd4de180b45922a2468fdcf79ea3`.
 - No production business resources were created, edited, deleted, shared or triggered.
 
-## Published v0.1.0
+## Published v0.2.0
+
+- Source/tag commit: `9768c452b4047b86ae8307d21aca2a44d05255a7`; tag `v0.2.0`.
+- [CI](https://github.com/Ricky-Hao/LibreChat-MCP/actions/runs/35000905404) and [Release workflow](https://github.com/Ricky-Hao/LibreChat-MCP/actions/runs/35001017271): passed, including all 21 tests and Docker build.
+- [Release package](https://github.com/Ricky-Hao/LibreChat-MCP/releases/tag/v0.2.0) downloaded and installed in an isolated prefix; CLI passed. SHA-256 matches the published asset: `0cbec284b5e9749f34d9a05dc2cb4d2545550eec73847f98d63e028658af5faa`.
+- Public `ghcr.io/ricky-hao/librechat-mcp:0.2.0` / `latest` published; anonymous pull of 0.2.0 verified with an empty Docker login configuration.
+- Image digest: `sha256:5300816e08f54a48c46c9c8b86cac4d3629f04780db790e7d30da3a424c229ca`.
+- Breaking config change: remove jwt; require refreshToken. JWT stays in memory, only refreshToken is written back. Mount a writable directory, use a single replica per session. No production/test-deployment LibreChat requests were made by this development session.
+
+## Published v0.1.0 (historical)
 
 - Code commit: `2e18a22da077af8bb54e662303a17faced8f58a6`; tag `v0.1.0`.
 - [GitHub CI](https://github.com/Ricky-Hao/LibreChat-MCP/actions/runs/34994727566): passed, including tests, package and Docker build.
