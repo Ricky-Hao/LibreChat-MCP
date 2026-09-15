@@ -1,6 +1,6 @@
 {
   "baseUrl": "http://librechat:3080",
-  "jwt": "REPLACE_WITH_YOUR_LIBRECHAT_USER_JWT",
+  "refreshToken": "REPLACE_WITH_YOUR_LIBRECHAT_REFRESH_COOKIE",
   "transport": "http",
   "host": "0.0.0.0",
   "port": 3000,

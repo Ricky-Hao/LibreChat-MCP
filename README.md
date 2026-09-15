@@ -6,7 +6,7 @@
 - **通用 API 请求**：没有接口白名单、只读模式或删除 / Run now 开关，方便请求上游新接口。
 - **Streamable HTTP + stdio**；JSON 配置；npm 包和 Docker 分发。
 
-> **仅用于可信内网。HTTP 默认没有鉴权，所有写操作均可调用。任何能连接它的人都能使用配置中 JWT 对应用户的权限。它不是多用户权限隔离服务，也不是聊天代理。不要直接暴露到公网。**
+> **仅用于可信内网。HTTP 默认没有鉴权，所有写操作均可调用。任何能连接它的人都能使用 refreshToken 对应用户的权限。它不是多用户权限隔离服务，也不是聊天代理。不要直接暴露到公网。**
 
 ## 快速运行
 
@@ -17,7 +17,7 @@ npm ci
 npm run build
 cp config.example.json config.json
 chmod 600 config.json
-# 用编辑器填写 config.json 中的 baseUrl 和 jwt，不把 JWT 放在命令行里
+# 用编辑器填写 baseUrl 和 refreshToken，不把凭据放在命令行里
 npm start -- --config ./config.json
 ```
 
@@ -26,7 +26,7 @@ npm start -- --config ./config.json
 ```json
 {
   "baseUrl": "http://librechat:3080",
-  "jwt": "YOUR_LIBRECHAT_USER_JWT",
+  "refreshToken": "YOUR_LIBRECHAT_REFRESH_COOKIE",
   "host": "0.0.0.0",
   "port": 3000
 }
@@ -39,7 +39,7 @@ MCP 地址：`http://<host>:3000/mcp`。健康检查：`GET /healthz`，只返�
 GitHub Release 提供可直接安装的 `.tgz` npm 包，不依赖 npm registry 登录：
 
 ```sh
-curl -fL -o librechat-mcp.tgz https://github.com/Ricky-Hao/LibreChat-MCP/releases/download/v0.1.0/ricky-hao-librechat-mcp-0.1.0.tgz
+curl -fL -o librechat-mcp.tgz https://github.com/Ricky-Hao/LibreChat-MCP/releases/download/v0.2.0/ricky-hao-librechat-mcp-0.2.0.tgz
 npm install -g ./librechat-mcp.tgz
 librechat-mcp --config ./config.json
 ```
@@ -49,16 +49,20 @@ librechat-mcp --config ./config.json
 ### Docker
 
 ```sh
-docker build -t librechat-mcp .
+mkdir -p config
+cp config.example.json config/config.json
+# 编辑 config/config.json 中的 baseUrl 和 refreshToken
+chmod 700 config
+chmod 600 config/config.json
 docker run --rm --name librechat-mcp \
   -p 127.0.0.1:3000:3000 \
-  -v "$PWD/config.json:/app/config.json:ro" \
-  librechat-mcp
+  -v "$PWD/config:/config" \
+  ghcr.io/ricky-hao/librechat-mcp:0.2.0
 ```
 
-容器以非 root 的 `node` 用户（UID 1000）运行。确保它能读取挂载文件；不要为了方便把 JWT 文件改成所有人可读。容器内配置 `host: "0.0.0.0"`，示例健康检查固定使用端口 3000。
+容器以非 root 的 `node` 用户（UID 1000）运行，配置目录与文件需归该 UID 所有且可写（必要时调整 ownership）。必须挂载**整个可写目录**，不能使用旧版的单文件或 `:ro` 挂载：刷新会以临时文件 + rename 原子保存轮换后的 refreshToken。容器内配置 `host: "0.0.0.0"`，健康检查固定使用端口 3000。
 
-已发布公开镜像：`ghcr.io/ricky-hao/librechat-mcp:0.1.0` / `latest`，已验证无登录匿名拉取。将上面 `docker run` 命令末尾的 `librechat-mcp` 替换为 `ghcr.io/ricky-hao/librechat-mcp:0.1.0` 即可，不需要自行构建。
+也可 `docker build -t librechat-mcp .` 从源码构建。K8s 请把 JSON 配置放在可写持久化目录，而不是直接挂载只读 ConfigMap/Secret；同一份刷新会话只运行 **1 个副本**。默认请求超时 30 秒，停止容器可用 `docker stop --time 40`，K8s 配置相应的 terminationGracePeriodSeconds，让正在轮换的凭据保存完成。
 
 ### stdio
 
@@ -79,23 +83,50 @@ librechat-mcp --config ./config.json --transport stdio
 }
 ```
 
-HTTP 客户端使用 `/mcp` 和 Streamable HTTP。服务无会话存储；不提供 GET SSE 订阅或 HTTP DELETE 会话端点。Gateway 的具体配置语法及实际集成未验证，不需要修改本服务来接入标准 Streamable HTTP 客户端。
+HTTP 客户端使用 `/mcp` 和 Streamable HTTP。服务无 MCP 会话存储；不提供 GET SSE 订阅或 HTTP DELETE 会话端点。HTTP 断开当前请求会取消该调用，但独立 POST 的取消通知不跨 MCP 实例路由；stdio 支持 SDK 取消通知。Gateway 的具体配置语法及实际集成未验证，不需要修改本服务来接入标准 Streamable HTTP 客户端。
 
 ## 配置
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `baseUrl` | 必填 | LibreChat HTTP(S) 根地址，可包含部署前缀；不要填到 `/api` |
-| `jwt` | 必填 | 合法用户 JWT 的原始 token，不带 `Bearer ` |
+| `refreshToken` | 必填 | 浏览器中 `refreshToken` cookie 的值；仅支持 `token_provider=librechat` |
 | `transport` | `http` | `http` 或 `stdio`，CLI 参数可覆盖 |
 | `host` | `127.0.0.1` | HTTP 监听地址；容器使用 `0.0.0.0` |
 | `port` | `3000` | HTTP 端口 |
 | `timeoutMs` | `30000` | 每次上游请求总超时 |
 | `authToken` | 不配置 | 可选的独立 MCP Bearer token，不是 LibreChat JWT |
 
-凭据只从 JSON 配置读取，**没有 Secret 文件引用、自动登录、自动刷新或 JWT 签名功能**。401 会提示 JWT 可能过期或失效；替换配置中的 `jwt` 并重启进程 / 容器即可轮换。配置在启动时读取，修改后必须重启。
+**v0.2.0 只接受 refreshToken，不兼容旧 `jwt` 配置。** 删除 `jwt` 字段即可升级，不需要自己获取 access JWT。
 
-`config.json` 和 `config.*.json` 已加入 Git ignore（示例文件除外），Docker build context 也不会包含配置文件。自定义文件名请自行加入 ignore；不要提交生产配置或把它烘焙进镜像。
+### 获取与刷新凭据
+
+1. 在自己的浏览器登录 LibreChat，完成二次验证（如果启用）。
+2. 开发者工具 → Application / 应用 → Cookies → LibreChat 域名。
+3. 确认 `token_provider` 是 `librechat`，复制 `refreshToken` 的值到 JSON。HttpOnly cookie 可以在开发者工具查看，不要用 `document.cookie`。
+4. 不要发送凭据给模型或提交到仓库。最好使用独立浏览器配置/登录会话为 MCP 获取凭据，随后不要继续在该浏览器会话里刷新或注销；浏览器和 MCP 同时轮换同一会话会互相使旧 cookie 失效。
+
+首次管理 API 调用时，程序向固定上游 `POST /api/auth/refresh`，使用 `Cookie: refreshToken=...; token_provider=librechat` 获取 JWT。JWT **只保存在内存**。之后遇到明确的 401，合并并发刷新，并用新 JWT 最多重放原请求一次；不解码 JWT 来判断身份，也不自动重试网络异常、5xx 或刷新请求本身。`healthz`、MCP 初始化/工具发现不会刷新或访问 LibreChat。
+
+上游 `Set-Cookie` 中轮换的 refreshToken 会原子回写**同一 JSON 配置**，权限设为 0600，保留其他配置字段。即使 JWT 响应正文损坏，也保存已经收到的轮换 cookie。回写失败返回 `AUTH_PERSIST_FAILED`；先修复目录可写性并再次调用（仅重试保存），不要先重启丢失内存中的新 cookie。正常 SIGTERM/SIGINT 会等待正在进行的刷新和保存，强制 kill / 崩溃或在收到新 cookie 前断网仍可能需要重新登录。
+
+上游默认 access JWT 约 15 分钟、refresh session 约 7 天（以目标部署配置为准）。自动刷新**不会无限延长原会话寿命**；`AUTH_REFRESH_FAILED` 时可能已过期/撤销/轮换丢失，需要重新登录获取 refreshToken，修改配置并重启。代理必须保留刷新响应的 `Set-Cookie`；仅返回 JWT 而没有轮换 cookie 会报告刷新失败。不支持 OIDC token reuse、账号密码自动登录或服务端签名密钥。
+
+`config/`、`config.json` 和 `config.*.json` 已加入 Git ignore（示例除外），Docker build context 不含配置。自定义文件名请自行加入 ignore。程序只自动更新 refreshToken；手动改配置时先停止服务，再编辑并启动，避免与正在进行的自动回写竞争。
+
+### 作为库使用
+
+CLI 自动注入持久化回调。直接使用导出的 API/factory 时，不传回调表示**只在内存保存、重启失效**；需要持久化请明确提供文件路径：
+
+```ts
+import { loadConfig, refreshTokenWriter, LibreChatClient, createHttpServer } from '@ricky-hao/librechat-mcp';
+const path = './config.json';
+const config = await loadConfig(path);
+const api = new LibreChatClient(config, refreshTokenWriter(path));
+const server = createHttpServer(config, api);
+server.listen(config.port, config.host);
+// 停止时关闭入站连接，并 await api.close() 等待刷新/保存完成。
+```
 
 ## 工具
 
@@ -135,8 +166,8 @@ HTTP 客户端使用 `/mcp` 和 Streamable HTTP。服务无会话存储；不提
 
 支持 `method`、`path` 或 `url`（二选一）、`query`、JSON `body`、`headers`。没有 endpoint、method、字段或管理操作白名单，写操作不需要另行开启。
 
-- 相对路径基于 `baseUrl`（保留部署前缀）。绝对 URL 原样访问；只有与 `baseUrl` **同源**时才自动带上配置的 JWT。
-- 调用者提供的 headers 会转发，包括自行指定的认证头；不要把生产凭据作为工具参数交给模型。
+- 相对路径基于 `baseUrl`（保留部署前缀）。绝对 URL 原样访问；只有与 `baseUrl` **同源**且未显式指定 Authorization/Cookie 时才自动取得并带上 JWT。
+- 调用者提供的 headers 会转发，包括自行指定的认证头；此时不使用托管刷新。外部 URL 和显式调用刷新端点也不会触发自动刷新。不要把生产凭据作为工具参数交给模型。
 - 不跟随重定向；3xx 作为上游状态返回错误，避免无意转发凭据。响应按 JSON 或文本读取，不是任意二进制下载代理。
 - 通用工具可以绕过专用工具的字段校验，最终受上游权限和只读来源等校验约束。这是刻意保留的管理员逃生口，不承诺细粒度策略隔离或抵御恶意客户端。
 
@@ -144,7 +175,7 @@ HTTP 客户端使用 `/mcp` 和 Streamable HTTP。服务无会话存储；不提
 
 工具成功返回 `{"status":200,"data":...}`；需要回读的操作另带 `current`。错误统一为 `{"error":{"code":...,"message":...,"status":...,"data":...,"uncertain":...}}`，MCP `isError=true`。409 保留上游冲突数据；写请求超时、断连、5xx 或写后验证失败会标记可能不确定，**不自动重试**，先读取核查，尤其不要盲目重复创建。
 
-输出会遮盖已知凭据字段及配置中的 JWT / authToken 原文；正常配置正文会返回给调用 Agent。日志仅包含工具名、耗时及结果，不打印请求 / 响应正文或认证头。这不是通用 DLP：别把其他秘密混入业务正文。
+输出会遮盖已知凭据字段、初始及轮换的 refreshToken/JWT，以及 authToken 原文；正常配置正文会返回给调用 Agent。日志仅包含工具名、耗时及结果，不打印请求 / 响应正文或认证头。这不是通用 DLP：别把其他秘密混入业务正文。
 
 ```sh
 npm run check

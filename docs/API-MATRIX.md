@@ -6,6 +6,18 @@
 
 所有工具名称前缀为 `librechat_`；以下省略前缀。
 
+## Authentication / refresh（v0.2.0）
+
+| HTTP method/path | 字段与返回 | 状态与影响 | MCP / 测试 |
+|---|---|---|---|
+| POST `/api/auth/refresh` | cookie `refreshToken` + `token_provider=librechat`；JSON `{token,user}`，`Set-Cookie: refreshToken=...` | 不需要旧 access JWT。验证 refresh token 与服务端 session、有效期后签发 JWT，并轮换 session 的 refresh-token hash；会话的原过期时间不无限延长 | 内部调用，不作为额外工具；mock bootstrap、401、并发、轮换/保存、损坏响应、取消/关闭 |
+
+配置只接受 refreshToken，不再接受 jwt。第一次托管 API 请求获取 JWT，明确 401 时只刷新并重放一次。JWT 在内存，CLI 将轮换 refreshToken 原子回写原 JSON。HTTP 各 POST 共享同一个 client 的刷新状态；独立 MCP 会话对象不会导致独立刷新。调用者显式 Authorization/Cookie、外部 URL、直接调用 refresh endpoint 不触发托管刷新。不是 OpenID/M2M 刷新、自动登录或凭据永久续期。
+
+普通请求超时/断连/5xx 和刷新请求自身不重试；下文“不重试”均不包括明确认证拒绝后的这一次 401 重放。生产 JWT/cookie/刷新行为尚未实测。
+
+源码：`api/server/controllers/AuthController.js` 非 OpenID refresh 分支、`api/server/services/AuthService.js:setAuthTokens`、`packages/data-schemas/src/methods/session.ts:generateRefreshToken`。
+
 ## Skills
 
 | HTTP method/path | 字段与返回 | 认证/权限、并发与副作用 | MCP / 测试 |
@@ -86,7 +98,7 @@ cadence：structured `hourly/daily/weekdays/weekly` + hour/minute/daysOfWeek，�
 
 ## 通用请求与验证边界
 
-`api_request` 转发任意 method/path 或 absolute URL、query、JSON body、headers；没有写入 gate / allowlist，供管理员访问未封装接口。配置 JWT 只自动附加到 baseUrl 同源请求；headers 可显式覆盖，redirect 不跟随；JSON/text 返回。可绕过专用工具输入限制，但不绕过上游认证。自动测试覆盖未知路由 DELETE、绝对 URL、origin 凭据处理、headers/query、错误与无重试。
+`api_request` 转发任意 method/path 或 absolute URL、query、JSON body、headers；没有写入 gate / allowlist，供管理员访问未封装接口。JWT 通过 refreshToken 内部获取，只自动附加到 baseUrl 同源且无显式 Authorization/Cookie 的请求；headers 可显式覆盖，redirect 不跟随；JSON/text 返回。可绕过专用工具输入限制，但不绕过上游认证。自动测试覆盖未知路由 DELETE、绝对 URL、origin 凭据处理、headers/query、错误与无重试。
 
 ## 源码证据索引
 
@@ -95,7 +107,7 @@ cadence：structured `hourly/daily/weekdays/weekly` + hour/minute/daysOfWeek，�
 - 挂载：`api/server/index.js`；用户 vs M2M 挂载顺序：`api/server/routes/agents/index.js`。
 - Skills：`api/server/routes/skills.js`、`api/server/services/Skills/handlers.js`、`api/server/services/Skills/sync.js`；`packages/api/src/skills/handlers.ts`、`packages/data-schemas/src/methods/skill.ts`；`api/server/middleware/accessResources/canAccessSkillResource.js`。
 - Skill user state：`api/server/controllers/SkillStatesController.js`、`api/server/routes/settings.js`。
-- Auth：`api/server/middleware/requireJwtAuth.js`、`api/server/routes/agents/middleware.js`、`packages/api/src/middleware/management.ts`。
+- Auth：`api/server/middleware/requireJwtAuth.js`、`api/server/controllers/AuthController.js`、`api/server/services/AuthService.js`、`packages/data-schemas/src/methods/session.ts`、`api/server/routes/agents/middleware.js`、`packages/api/src/middleware/management.ts`。
 - Agents：`api/server/routes/agents/v1.js`、`api/server/controllers/agents/v1.js`、`packages/api/src/agents/validation.ts`、`packages/data-provider/src/schemas.ts`（SkillsScope）。
 - Schedules：`api/server/routes/schedules.js`、`packages/data-provider/src/types/schedules.ts`、`packages/api/src/schedules/handlers.ts`、`packages/api/src/schedules/cadence.ts`。
 - Prompts：`api/server/routes/prompts.js`、`packages/api/src/prompts/schemas.ts`、`packages/api/src/prompts/format.ts`、`packages/data-schemas/src/methods/prompt.ts`、`packages/data-schemas/src/schema/prompt.ts`。
