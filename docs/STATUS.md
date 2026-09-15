@@ -35,4 +35,14 @@
 - Compatibility with dev commits newer than `21a9edbe7481fd4de180b45922a2468fdcf79ea3`.
 - No production business resources were created, edited, deleted, shared or triggered.
 
-GitHub Release `.tgz` and GHCR image publication depend on the release workflow; npm registry additionally requires an authorized `NPM_TOKEN`. Do not assume any registry publication from a local build alone.
+## Published v0.1.0
+
+- Code commit: `2e18a22da077af8bb54e662303a17faced8f58a6`; tag `v0.1.0`.
+- [GitHub CI](https://github.com/Ricky-Hao/LibreChat-MCP/actions/runs/34994727566): passed, including tests, package and Docker build.
+- [Release workflow](https://github.com/Ricky-Hao/LibreChat-MCP/actions/runs/34994839905): passed.
+- [GitHub Release](https://github.com/Ricky-Hao/LibreChat-MCP/releases/tag/v0.1.0): npm `.tgz` uploaded, downloaded again, SHA-256 verified and installed in a temporary prefix; CLI executed successfully. Download first and install the local tarball (some npm environments disallow remote URL installs).
+- `ghcr.io/ricky-hao/librechat-mcp:0.1.0` and `latest` published. Pulled `0.1.0` with an empty Docker auth configuration, confirming public/anonymous access.
+- Image digest: `sha256:03874d4790083c7acadd85c3138aad5e8a5e5abaac9c5ae1c44a5bfe360ff6a8`.
+- **npm registry not published**: no `NPM_TOKEN` configured. GitHub Release package installation works without it.
+- CI emitted non-fatal deprecation notices for actions using the Node 20 action runtime (runner executes them on Node 24). All steps succeeded; the application/container runs on Node 22.
+

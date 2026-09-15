@@ -39,7 +39,8 @@ MCP 地址：`http://<host>:3000/mcp`。健康检查：`GET /healthz`，只返�
 GitHub Release 提供可直接安装的 `.tgz` npm 包，不依赖 npm registry 登录：
 
 ```sh
-npm install -g https://github.com/Ricky-Hao/LibreChat-MCP/releases/download/v0.1.0/ricky-hao-librechat-mcp-0.1.0.tgz
+curl -fL -o librechat-mcp.tgz https://github.com/Ricky-Hao/LibreChat-MCP/releases/download/v0.1.0/ricky-hao-librechat-mcp-0.1.0.tgz
+npm install -g ./librechat-mcp.tgz
 librechat-mcp --config ./config.json
 ```
 
@@ -57,7 +58,7 @@ docker run --rm --name librechat-mcp \
 
 容器以非 root 的 `node` 用户（UID 1000）运行。确保它能读取挂载文件；不要为了方便把 JWT 文件改成所有人可读。容器内配置 `host: "0.0.0.0"`，示例健康检查固定使用端口 3000。
 
-Release workflow 构建镜像：`ghcr.io/ricky-hao/librechat-mcp:0.1.0` / `latest`。首次发布后检查 GHCR package 可见性；GitHub 仓库公开不代表容器包一定公开。也可以从源码直接构建，无需 registry。
+已发布公开镜像：`ghcr.io/ricky-hao/librechat-mcp:0.1.0` / `latest`，已验证无登录匿名拉取。将上面 `docker run` 命令末尾的 `librechat-mcp` 替换为 `ghcr.io/ricky-hao/librechat-mcp:0.1.0` 即可，不需要自行构建。
 
 ### stdio
 
