@@ -53,6 +53,15 @@
 - Compatibility with dev commits newer than `21a9edbe7481fd4de180b45922a2468fdcf79ea3`.
 - No production business resources were created, edited, deleted, shared or triggered.
 
+## Published v0.3.1
+
+- Source/tag commit: `12c20db628e00cb7f7872069f4765d9f24c384fa`; tag `v0.3.1`.
+- [CI](https://github.com/Ricky-Hao/LibreChat-MCP/actions/runs/35060578746) and [Release workflow](https://github.com/Ricky-Hao/LibreChat-MCP/actions/runs/35060636736): passed, including 35 tests, package and Node 22 Docker build.
+- [Release package](https://github.com/Ricky-Hao/LibreChat-MCP/releases/tag/v0.3.1) downloaded anonymously, SHA-256 checked against GitHub's asset digest, installed in an isolated prefix, and CLI/version verified. SHA-256: `a6f71ecae46957710970fe58650ddfcdebf1edae2ab9175e856782c5e2915686`.
+- Public image `ghcr.io/ricky-hao/librechat-mcp:0.3.1` / `latest` published; versioned anonymous pull verified. Digest: `sha256:1f58d2f44c479a50f4e4a0c4e23a9e950295129d1a946e2da3bc90a295c0c2b6`.
+- Published-container smoke passed against a loopback-only synthetic upstream: health, MCP version/56 tools, UID 1000, PATCH history trimming, explicit history retrieval, nested configuration preservation, one PATCH per call, refresh bootstrap and atomic rotated-cookie save with mode 0600. Temporary container/config/install directories removed. The initial fixture's host UID/umask permissions were corrected before the successful smoke run; no application fix was needed.
+- npm registry publication skipped because NPM_TOKEN was not configured. No production deployment, real Agent mutations or task execution. Other resource responses remain unchanged; only the Agent optimization is included.
+
 ## Published v0.3.0
 
 - Source/tag commit: `f3b4e955bf51dcaa973f7c7b125e388afe034a91`; tag `v0.3.0`. The unreleased v0.2.1 UA fix was folded into this expanded feature release.
