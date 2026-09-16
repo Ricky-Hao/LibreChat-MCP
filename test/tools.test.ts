@@ -138,6 +138,45 @@ test('Prompt content appends versions, production is separate, and HTTP 200 appl
   assert.equal((await h.call('prompts_add_version', { groupId, prompt: { type: 'text', prompt: 'v3' } })).isError, true);
 });
 
+test('Chat Project CRUD and explicit conversation assignment use real routes without cascading chat deletion', async (t) => {
+  const projectId = '1234567890abcdef12345678';
+  const h = await setup(t, (r, res) => {
+    if (r.method === 'POST') res.statusCode = 201;
+    if (r.method === 'DELETE') return { deletedCount: 1, modifiedCount: 3 };
+    if (r.method === 'PUT') return { conversation: { conversationId: 'chat/one', chatProjectId: r.body.projectId }, previousProjectId: projectId, projectId: r.body.projectId };
+    if (r.path.includes('?')) return { projects: [{ _id: projectId, name: 'Project' }], nextCursor: 'next cursor' };
+    return { _id: projectId, name: 'Project', ...r.body };
+  });
+  const list = output(await h.call('projects_list', { limit: 2, cursor: 'old cursor', search: 'C++', sortBy: 'name', sortDirection: 'asc' }));
+  assert.equal(list.data.nextCursor, 'next cursor');
+  assert.equal(new URL(h.last().path, 'http://test').searchParams.get('search'), 'C++');
+  assert.equal(new URL(h.last().path, 'http://test').searchParams.get('cursor'), 'old cursor');
+  assert.equal(output(await h.call('projects_create', { name: ' Project ', description: 'Description' })).status, 201);
+  assert.equal(h.last().path, '/api/projects');
+  assert.deepEqual(h.last().body, { name: 'Project', description: 'Description' });
+  await h.call('projects_get', { projectId });
+  assert.equal(h.last().path, `/api/projects/${projectId}`);
+  assert.equal(h.last().method, 'GET');
+  await h.call('projects_update', { projectId, changes: { description: '' } });
+  assert.equal(h.last().method, 'PATCH');
+  assert.deepEqual(h.last().body, { description: '' });
+  for (const destination of [projectId, null]) {
+    await h.call('conversations_set_project', { conversationId: 'chat/one', projectId: destination });
+    assert.equal(h.last().method, 'PUT');
+    assert.equal(h.last().path, '/api/projects/conversations/chat%2Fone');
+    assert.deepEqual(h.last().body, { projectId: destination });
+  }
+  const before = h.seen.length;
+  assert.equal((await h.call('conversations_set_project', { conversationId: 'chat/one' })).isError, true);
+  assert.equal((await h.call('projects_update', { projectId, changes: {} })).isError, true);
+  assert.equal((await h.call('projects_create', { name: '   ' })).isError, true);
+  assert.equal(h.seen.length, before);
+  assert.deepEqual(output(await h.call('projects_delete', { projectId })), { status: 200, data: { deletedCount: 1, modifiedCount: 3 } });
+  assert.equal(h.last().method, 'DELETE');
+  assert.equal(h.last().path, `/api/projects/${projectId}`);
+  assert.equal(h.seen.length, before + 1); // No extra calls deleting conversations/messages/files.
+});
+
 test('visibility, named sharing and unrestricted generic writes are available by default', async (t) => {
   const h = await setup(t, () => ({ public: true, principals: [] }));
   await h.call('visibility_set', { resourceType: 'skill', resourceId: skillId, public: true });

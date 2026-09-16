@@ -1,9 +1,17 @@
 # Delivery status
 
+## v0.3.0
+
+- Adds `userAgent` JSON configuration with the requested Windows Edge/Chrome 153 default. Applied to internal refresh calls and all API requests/replays; explicit generic-request User-Agent overrides only that request.
+- SSE `event: error` is an application failure even with HTTP 200: parse incrementally, preserve/redact error data, cancel reading and never retry that stream error. Normal SSE/text remains unchanged.
+- Adds 16 tools: Conversation list/get/metadata-only create/title update/archive/pin/single deletion, paged/full message reads and Meili message search; Chat Project CRUD and explicit conversation assignment/unlink.
+- Audited pinned routes and model behavior: title-upsert creation needs no model call; message paging can skip ties; full reads preserve branches; project deletion unlinks rather than deleting chats. APIs are authenticated-user scoped, not cross-user administrator access.
+- Local type-check, all 31 mock/protocol tests and build pass. Actual deployment UA acceptance, SSE, search backend and new resource lifecycle remain unverified.
+
 ## Implemented
 
 - Independent TypeScript HTTP API client, JSON config, npm CLI/library exports.
-- 40 MCP tools covering Skills/files/user activation, Agents/Skill bindings/history, Schedules/cron/run-now, Prompt groups/versions/defaults, sharing/public visibility, unrestricted generic requests.
+- 56 MCP tools covering Skills/files/user activation, Agents/Skill bindings/history, Schedules/cron/run-now, Prompt groups/versions/defaults, Conversations/messages/search, Chat Projects/assignment, sharing/public visibility and unrestricted generic requests.
 - Streamable HTTP (stateless JSON responses), stdio, optional downstream bearer, anonymous internal HTTP by default.
 - Source-verified Skill and Schedule revision fields, Prompt append/default semantics, named/public ACL updates with read-back.
 - v0.2.0: refreshToken-only config, in-memory JWT bootstrap, one replay after explicit 401, concurrent refresh coalescing across HTTP POSTs, atomic rotated-cookie persistence and graceful shutdown drain. No network/5xx or refresh-exchange retries. Output redaction includes old/new access and refresh tokens.
@@ -13,17 +21,18 @@
 ## Local validation
 
 - `npm run check`, `npm run build`: passed.
-- `npm test`: 21 focused tests passed, including 8 refresh/persistence/concurrency/shutdown cases. Covers config, generic forwarding, credentials/redirects, 401/403/404/409/429/500, interrupted/timeout writes, cancellation between dependent requests, key CRUD/merge/version/permission semantics, pagination, MCP HTTP + stdio initialize/discover/call and protocol errors.
+- `npm test`: 31 grouped tests passed, including User-Agent forwarding, 3 SSE cases, 5 Conversation/Message groups, Chat Project mapping and 8 refresh/persistence/concurrency/shutdown cases. Covers config, generic forwarding, credentials/redirects, 401/403/404/409/429/500, interrupted/timeout writes, cancellation between dependent requests, key CRUD/merge/version/permission semantics, pagination, MCP HTTP + stdio initialize/discover/call and protocol errors. Mocks do not prove live ACLs, database cascades or Meili indexing.
 - `npm pack`: passed; package allowlist includes built code/docs/example, excludes local configuration/tests/source/dev caches.
 - `docker build -t librechat-mcp:0.2.0 .`: passed on Node 22. Real container smoke with a mock upstream verified refresh-only bootstrap, UID 1000 runtime, atomic cookie save with 0600 permissions, and restart using the saved rotated cookie. Both containers/temp files removed. Default config path is `/config/config.json`, requiring a writable directory mount.
 - Installed the packed `.tgz` in an isolated temporary directory; CLI executable passed.
-- Started the Docker container with synthetic configuration: health check, real MCP initialization and discovery of all 40 tools passed; runtime UID verified as 1000. Container and temporary files removed afterward.
+- Historical v0.2.0 container smoke with synthetic configuration: health check, real MCP initialization and discovery of all 40 tools passed; runtime UID verified as 1000. Container and temporary files removed afterward.
 - Remote CI/release results are recorded in the delivery report rather than treated as live upstream integration.
 
 ## Not implemented / intentionally out of scope
 
 - No Schedule sharing API exists in the audited resource ACL model.
 - No generic Agent/Prompt enable/disable API or Prompt in-place content update; Prompt content changes append a version.
+- No cross-user Conversation/Project admin bypass, chat generation/send, message-body editing, bulk conversation clear, Project archive/sharing or synthetic search pagination. Empty Conversation creation intentionally uses the pinned title-upsert, not an invented create-only endpoint.
 - No standalone tools for every advanced Agent field, duplicate/revert/avatar, Skill archive import, or arbitrary binary downloads. Use the generic request where its JSON/text contract fits; attachment uploads support utf8/base64.
 - No M2M/OpenID management-auth setup or refresh, JWT signing/decoding identity claims, login/password storage, Secret-file loader or manual-config hot reload.
 - No cross-process refresh coordination; use one process/replica per refresh session. Library factories without an explicit persistence callback are in-memory only; CLI always provides it.

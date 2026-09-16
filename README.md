@@ -2,7 +2,7 @@
 
 给内网管理员 / Agent 使用的小型 LibreChat 管理 MCP Server。TypeScript + 官方 MCP SDK，无数据库、管理界面、登录流程或策略引擎。
 
-- **40 个工具**：Skills（含附件和激活状态）、Agents（含 Skill 绑定）、Scheduled Tasks / Cron、Prompt 库，以及共享 / 可见性管理。
+- **56 个工具**：Skills（含附件和激活状态）、Agents（含 Skill 绑定）、Scheduled Tasks / Cron、Prompt 库、Conversation 增删查改 / 归档 / 消息搜索、Chat Project 增删查改，以及共享 / 可见性管理。
 - **通用 API 请求**：没有接口白名单、只读模式或删除 / Run now 开关，方便请求上游新接口。
 - **Streamable HTTP + stdio**；JSON 配置；npm 包和 Docker 分发。
 
@@ -39,7 +39,7 @@ MCP 地址：`http://<host>:3000/mcp`。健康检查：`GET /healthz`，只返�
 GitHub Release 提供可直接安装的 `.tgz` npm 包，不依赖 npm registry 登录：
 
 ```sh
-curl -fL -o librechat-mcp.tgz https://github.com/Ricky-Hao/LibreChat-MCP/releases/download/v0.2.0/ricky-hao-librechat-mcp-0.2.0.tgz
+curl -fL -o librechat-mcp.tgz https://github.com/Ricky-Hao/LibreChat-MCP/releases/download/v0.3.0/ricky-hao-librechat-mcp-0.3.0.tgz
 npm install -g ./librechat-mcp.tgz
 librechat-mcp --config ./config.json
 ```
@@ -57,7 +57,7 @@ chmod 600 config/config.json
 docker run --rm --name librechat-mcp \
   -p 127.0.0.1:3000:3000 \
   -v "$PWD/config:/config" \
-  ghcr.io/ricky-hao/librechat-mcp:0.2.0
+  ghcr.io/ricky-hao/librechat-mcp:0.3.0
 ```
 
 容器以非 root 的 `node` 用户（UID 1000）运行，配置目录与文件需归该 UID 所有且可写（必要时调整 ownership）。必须挂载**整个可写目录**，不能使用旧版的单文件或 `:ro` 挂载：刷新会以临时文件 + rename 原子保存轮换后的 refreshToken。容器内配置 `host: "0.0.0.0"`，健康检查固定使用端口 3000。
@@ -95,7 +95,16 @@ HTTP 客户端使用 `/mcp` 和 Streamable HTTP。服务无 MCP 会话存储；�
 | `host` | `127.0.0.1` | HTTP 监听地址；容器使用 `0.0.0.0` |
 | `port` | `3000` | HTTP 端口 |
 | `timeoutMs` | `30000` | 每次上游请求总超时 |
+| `userAgent` | 下方浏览器 UA | 用于所有上游 API 和内部刷新请求；通用请求显式 User-Agent 优先，仅覆盖该次请求，不改变内部刷新 UA |
 | `authToken` | 不配置 | 可选的独立 MCP Bearer token，不是 LibreChat JWT |
+
+`userAgent` 可省略，默认值为：
+
+```text
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0
+```
+
+自定义时在 JSON 中增加 `"userAgent": "你的 UA"`，重启生效。刷新 cookie 回写会保留此字段。
 
 **v0.2.0 只接受 refreshToken，不兼容旧 `jwt` 配置。** 删除 `jwt` 字段即可升级，不需要自己获取 access JWT。
 
@@ -141,6 +150,10 @@ server.listen(config.port, config.host);
 | Cron | `schedules_list`, `schedules_get`, `schedules_create`, `schedules_update`, `schedules_delete`, `schedules_set_enabled`, `schedules_run_now` |
 | Prompt 分组 | `prompt_groups_list`, `prompt_groups_get`, `prompt_groups_create`, `prompt_groups_update`, `prompt_groups_delete` |
 | Prompt 版本 | `prompts_list`, `prompts_get`, `prompts_add_version`, `prompts_set_default`, `prompts_delete` |
+| Conversations | `conversations_list`, `conversations_get`, `conversations_create`, `conversations_update`, `conversations_delete`, `conversations_set_archived`, `conversations_set_pinned` |
+| 消息 / 检索 | `conversations_messages_list`, `conversations_messages_read`, `messages_search` |
+| Chat Projects | `projects_list`, `projects_get`, `projects_create`, `projects_update`, `projects_delete` |
+| 会话项目归属 | `conversations_set_project` |
 | 共享 / 可见性 | `permissions_roles`, `permissions_get`, `permissions_update`, `visibility_set` |
 | 通用 | `api_request` |
 
@@ -151,6 +164,11 @@ server.listen(config.port, config.host);
 - **Skill 绑定**：`agents_set_skills` 单独设置 binding、enabled 和 scope；建议明确指定 `scope: "selected"`。上游 legacy 空数组可能表示所有 Skills，而非无绑定；`scope: "none"` 明确表示不暴露 Skill catalog。
 - **Cron**：支持上游 structured cadence 和 `{"frequency":"cron","expression":"0 9 * * 1-5"}`。提供 IANA 时区。创建要求 `clientRequestId`，用同一 key 标识同一创建意图；默认创建为停用，显式 `enabled: true` 可直接启用。更新 / 启停传 `expectedConfigRevision`。不会隐式调用 Run now，但已启用任务会按时间执行。修改可能重算 `nextRunAt`、执行 MCP preflight 并影响在途任务；删除可能返回 202 draining。
 - **Prompt 库**：一个 group 下的每个 Prompt 文档是一版，不存在供客户端使用的数字版本 CAS。修改正文用 `prompts_add_version` 追加；`prompts_set_default` 另行改变 `productionId`。删除最后一版会删除 group；删除默认版会选择最新剩余版。
+- **Conversation**：操作当前凭据用户自己的会话，没有管理员跨用户 bypass。创建使用本次审计版本的标题 upsert 接口 + 新 UUID，仅创建 metadata，不调用模型。修改只改标题，先读存在性，但没有原子 update-only/CAS；归档、置顶和项目归属分别操作。列表默认只列未归档，`isArchived: true` 只列归档。
+- **会话内容**：`conversations_get` 只读 metadata；`conversations_messages_list` 分页读取正文，保留结构化 content 和 parentMessageId。上游时间游标可能漏掉同时间戳消息；需要完整内容时用 `conversations_messages_read`，返回全部存储分支的数组、大小无界，可用 messageId 只读一条。
+- **消息搜索**：`messages_search` 的 query 交给 Meilisearch，limit 最多 1000；含归档会话，没有可靠搜索分页、不能组合 conversationId。不保证索引实时或所有 tool/附件内容可搜。Conversation 列表的 search 也搜索标题及消息，但候选集有上游上限。通用 GET `/api/search/enable` 可检查 SEARCH/Meili 健康；未部署/不可用时搜索会报上游错误，不伪装为空结果。
+- **Chat Project**：支持 name/description，不是旧 Agent sharing project，也没有 instructions、共享或归档 API。列表搜索 name/description，不依赖 Meili；用 Conversation 列表的 projectId 查看项目内会话。`conversations_set_project` 必须明确传 projectId，null 解除归属；一个会话只能属于一个项目。
+- **删除区别**：删除 Conversation 会级联子会话、消息等，并协调停止相关生成，但不保证擦除上传文件。删除 Project 只解除会话归属，保留会话/消息/文件；相关 Schedule 可能在后续执行检查中停用。两者都可能部分成功，不作事务或即时完全清理承诺，不自动清空其他会话。
 - **可见性**：权限工具使用文档 `_id`，不是 Agent 的 `agent_...` ID。`public: false` 只撤销公开访问，不会删除现有具名共享。Cron 没有共享 API；Agent / Prompt 没有通用启停开关，不造这些接口。
 - **读请求也可能有副作用**：上游 Skills 列表可能同步 GitHub，Schedules 列表重试延期删除，附件读取可能写缓存。本工具按内网管理员用途直接调用，不额外阻止这些 GET。
 
@@ -169,6 +187,7 @@ server.listen(config.port, config.host);
 - 相对路径基于 `baseUrl`（保留部署前缀）。绝对 URL 原样访问；只有与 `baseUrl` **同源**且未显式指定 Authorization/Cookie 时才自动取得并带上 JWT。
 - 调用者提供的 headers 会转发，包括自行指定的认证头；此时不使用托管刷新。外部 URL 和显式调用刷新端点也不会触发自动刷新。不要把生产凭据作为工具参数交给模型。
 - 不跟随重定向；3xx 作为上游状态返回错误，避免无意转发凭据。响应按 JSON 或文本读取，不是任意二进制下载代理。
+- 对 `text/event-stream` 及未声明 Content-Type 的响应逐块检查 SSE（上游权限拒绝路径可能漏写该头）：即使 HTTP 200，收到 `event: error` 就返回 `UPSTREAM_STREAM_ERROR`、MCP `isError: true`，保留脱敏后的事件 data，并停止读取，不等待流结束、不重试。写操作标记结果可能不确定。正常结束的 SSE 仍返回原始文本；显式普通文本 Content-Type 和 SSE data/comment 中的字样不会误判。
 - 通用工具可以绕过专用工具的字段校验，最终受上游权限和只读来源等校验约束。这是刻意保留的管理员逃生口，不承诺细粒度策略隔离或抵御恶意客户端。
 
 ## 返回、日志与测试

@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { createParser } from 'eventsource-parser';
 import type { Config } from './config.js';
 
 export type Query = Record<string, string | number | boolean | (string | number | boolean)[]>;
@@ -19,6 +20,42 @@ export class ApiError extends Error {
     public data?: unknown,
     public uncertain = false,
   ) { super(message); }
+}
+
+function parseText(text: string): unknown {
+  try { return text ? JSON.parse(text) : null; } catch { return text; }
+}
+
+/** SSE can fail at the application layer after successful HTTP headers. */
+async function readBody(response: Response, write: boolean): Promise<string> {
+  const mediaType = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
+  // LibreChat denyRequest can emit SSE without setting Content-Type.
+  if (!response.ok || (mediaType && mediaType !== 'text/event-stream') || !response.body) {
+    return response.text();
+  }
+  const parser = createParser({ onEvent(event) {
+    if (event.event === 'error') {
+      throw new ApiError('UPSTREAM_STREAM_ERROR', 'Upstream emitted an SSE error event. Inspect resource state before retrying a write.', response.status, parseText(event.data), write);
+    }
+  } });
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      const text = done ? decoder.decode() : decoder.decode(value, { stream: true });
+      chunks.push(text);
+      parser.feed(text);
+      if (done) {
+        parser.feed('\n\n'); // Also inspect a final frame from servers omitting its blank terminator.
+        return chunks.join('');
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
 }
 
 /** Used only on output, never on data being sent back in an update. */
@@ -50,7 +87,7 @@ export class LibreChatClient {
   private context = new AsyncLocalStorage<AbortSignal>();
 
   constructor(
-    private config: Pick<Config, 'baseUrl' | 'refreshToken' | 'timeoutMs'>,
+    private config: Pick<Config, 'baseUrl' | 'refreshToken' | 'timeoutMs' | 'userAgent'>,
     private saveRefreshToken?: (refreshToken: string) => Promise<void>,
   ) {
     this.base = new URL(config.baseUrl.replace(/\/$/, '') + '/');
@@ -104,7 +141,7 @@ export class LibreChatClient {
       // the server session and must be saved even if one waiter disconnects. No refresh retry.
       const response = await fetch(new URL('api/auth/refresh', this.base), {
         method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(this.config.timeoutMs),
-        headers: { accept: 'application/json', cookie: `refreshToken=${encodeURIComponent(this.refreshToken)}; token_provider=librechat` },
+        headers: { accept: 'application/json', 'user-agent': this.config.userAgent, cookie: `refreshToken=${encodeURIComponent(this.refreshToken)}; token_provider=librechat` },
       });
       status = response.status;
       if (!response.ok) { await response.body?.cancel(); throw new Error(); }
@@ -144,6 +181,7 @@ export class LibreChatClient {
       for (const item of Array.isArray(value) ? value : [value]) url.searchParams.append(key, String(item));
     }
     const requestHeaders = new Headers(headers);
+    if (!requestHeaders.has('user-agent')) requestHeaders.set('user-agent', this.config.userAgent);
     const managedAuth = url.origin === this.base.origin && !requestHeaders.has('authorization') && !requestHeaders.has('cookie');
     const canRefresh = managedAuth && url.pathname.replace(/\/$/, '') !== new URL('api/auth/refresh', this.base).pathname;
     if (canRefresh && (!this.jwt || this.unsaved)) await this.refresh(this.generation);
@@ -162,11 +200,10 @@ export class LibreChatClient {
           redirect: 'manual',
           signal: AbortSignal.any([AbortSignal.timeout(this.config.timeoutMs), ...(parentSignal ? [parentSignal] : [])]),
         });
-        const text = await response.text();
-        let data: unknown;
-        try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+        const data = parseText(await readBody(response, write));
         return { response, data, generation };
-      } catch {
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
         throw new ApiError('NETWORK_ERROR', write
           ? 'Request interrupted or timed out. The write may have committed; read back before retrying.'
           : 'Request failed or timed out.', undefined, undefined, write);

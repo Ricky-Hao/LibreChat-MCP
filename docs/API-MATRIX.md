@@ -83,7 +83,44 @@ cadence：structured `hourly/daily/weekdays/weekly` + hour/minute/daysOfWeek，�
 | PATCH `/api/prompts/:promptId/tags/production` | `{message}`；工具回读 group 验证 productionId | CREATE + group EDIT；无 CAS，可能 concurrent change | `prompts_set_default`；mock readback |
 | DELETE `/api/prompts/:promptId?groupId=...` | 删除结果；可能额外返回 promptGroup 被删 | group DELETE；最后一版删除 group/ACL；若删除 production 则选最新剩余版本 | `prompts_delete`；mock query |
 
-本版 Prompt schema 没有数字 `version`；版本就是单独文档及创建时间。没有内容 in-place PATCH 或一般 enabled API。部分 Prompt 模型会用 HTTP 200 + error message 代表失败，专用创建/编辑/读取工具检查必要返回形状；通用工具只报告实际 HTTP 状态/正文，不替任意新 API 解释业务成功。
+本版 Prompt schema 没有数字 `version`；版本就是单独文档及创建时间。没有内容 in-place PATCH 或一般 enabled API。部分 Prompt 模型会用 HTTP 200 + error message 代表失败，专用创建/编辑/读取工具检查必要返回形状；通用工具除 SSE error 事件外，只报告实际 HTTP 状态/正文，不替任意新 API 解释业务成功。
+
+## Conversations / Messages（v0.3.0）
+
+**仅当前认证用户自己的会话；这些接口没有管理员跨用户 bypass，分享链接也不赋予 owner API 访问权。** 租户、retention、子线程可见性仍由上游检查。以下均为已实现 / mock 映射，不是线上功能验证。
+
+| HTTP method/path | 字段与返回 | 并发、限制与副作用 | MCP / 测试 |
+|---|---|---|---|
+| GET `/api/convos` | `limit` 默认 25 / 最大 100，`cursor,isArchived,pinned,tags,search,sortBy,sortDirection,projectId`；`{conversations,nextCursor}` | `isArchived=false` 只列未归档、true 只列归档；pinned=false 不过滤；tags 重复键匹配任一标签；projectId 为 ObjectId 或 `unassigned`。同一遍历保持过滤/排序不变 | `conversations_list`；mock query/cursor |
+| GET `/api/convos/:conversationId` | conversation 文档；messages 仅引用，不是正文 | owner-scoped；404 unavailable；不调用 gen_title（后者会消费缓存）。metadata 和消息读取的 retention 检查并不完全一致 | `conversations_get`；mock |
+| GET `/api/messages?conversationId=...` | `pageSize,cursor,sortBy,sortDirection`；`{messages,nextCursor}`；工具默认 25 / createdAt / asc，本地 pageSize 上限 1000 | 必须是根路径 query。上游单字段时间游标无 ID tie-breaker，且日期字符串可能丢毫秒，会漏同值消息；不能保证遍历完整 | `conversations_messages_list`；mock root query/structured content |
+| GET `/api/messages/:conversationId[/:messageId]` | 完整消息数组；可选 messageId 返回零或一项数组，空数组不伪报 404 | 完整读取无分页、大小无界；包括全部存储分支，保留 parentMessageId/text/content/files 等，不扁平化为单线对话 | `conversations_messages_read`；mock path/branches |
+| GET `/api/messages?search=...&pageSize=...` | 工具 query → search、limit → pageSize，默认 25 / 最大 1000；`{messages,nextCursor:null}` | Meili 全文搜索；含归档会话。无可用搜索分页、无 conversationId 联合过滤（传 ID 会绕过搜索）；不伪造 total/cursor。保留上游命中数据和中央凭据脱敏，不额外宣称与普通消息读取投影相同 | `messages_search`；mock mapping/errors |
+| GET `/api/search/enable` | JSON boolean | SEARCH 开关及 Meili 健康检查，不代表索引完整；不是搜索接口 | 通用 `api_request`，无自动 preflight/gate |
+| POST `/api/convos/update`（创建） | `{arg:{conversationId,title}}`；201 conversation | **没有专门空会话创建 API**。工具生成新 UUID，利用 pinned 标题接口 upsert 创建仅 metadata 的会话；无模型调用，无 create-only/CAS 保证，无跨调用幂等键；验证返回 ID/title | `conversations_create`；mock UUID/no chat call |
+| POST `/api/convos/update`（修改） | 同上，只支持 title；工具 trim 且限制 1024，不静默截断 | 先 GET 确认存在以防拼错 ID 触发 upsert，但不是原子 update-only；并发删除后仍可能重建。200/201 `{message:"Error saving conversation"}` 不算成功 | `conversations_update`；mock pre-read/embedded error |
+| POST `/api/convos/archive` | `{arg:{conversationId,isArchived:boolean}}`；200 conversation | 无 upsert，保留 updatedAt；归档写 archivedAt，取消清空。内部有并发重试，但耗尽可返回相反状态，工具核对 ID/目标值；不停止生成、不删除消息/文件/分享 | `conversations_set_archived`；mock boolean/state verification |
+| POST `/api/convos/pin` | `{arg:{conversationId,pinned:boolean}}`；200 conversation | 无 upsert，保留 updatedAt，无客户端 CAS；核对返回状态 | `conversations_set_pinned`；mock |
+| DELETE `/api/convos` | **仅** `{arg:{conversationId}}`；201 `{acknowledged,deletedCount,messages,conversationIds}` | 必填非空字符串 ID，绝不透传 source/endpoint/thread_id 或批量参数；零删除可成功。级联 owner 子会话、消息、checkpoint、分享等，协调生成/子任务停止；部分失败仍可能已写入。不承诺任意旧 provider 执行均已停止或附件 blob 擦除；上游清理失败标志不能当完整成功 | `conversations_delete`；mock exact body/no bulk/zero count |
+
+搜索依赖 `MEILI_HOST` / `MEILI_MASTER_KEY` 和可用索引；同步由 `SEARCH` 控制，索引最终一致。`SEARCH=false` 时既有索引查询仍可能返回旧数据；`/api/search/enable=true` 不保证索引可查或完整。实际没有 `GET /api/search?q=...` 路由，不能沿用数据提供层的旧 URL helper。Conversation list 的 search 合并 title/index 与 message 命中，每个索引最多 1000；消息索引查询失败时可能静默退化为标题等 conversation-index 匹配。消息搜索支持索引中的 text、thinking、steer 文本，不保证任意 tool 内容或附件字节可检索；查询语义由部署的 Meili 决定，无本地 SQL/Lucene/regex 解析。
+
+不提供批量归档/清空、聊天发送/模型生成、任意 conversation 字段 PATCH 或消息正文编辑工具。项目归属使用下节的独立 setter；更多接口仍可显式使用通用请求。
+
+## Chat Projects（v0.3.0）
+
+这里是 `ChatProject` / `chatprojects`，不是旧的 Agent sharing `projects` 集合，也不是 AgentCategory。所有操作 owner-scoped，无管理员跨 owner、共享或角色管理接口。
+
+| HTTP method/path | 字段与返回 | 并发、限制与副作用 | MCP / 测试 |
+|---|---|---|---|
+| GET `/api/projects` | `cursor,limit` 默认 25 / 最大 100；sortBy `name/createdAt/lastConversationAt`，sortDirection `asc/desc`，search；`{projects,nextCursor}` | 搜索 name/description 的字面子串、不依赖 Meili；默认活动时间倒序 + ID tie-breaker，无 total；同一遍历保持 search/sort | `projects_list`；mock query/cursor |
+| GET `/api/projects/:projectId` | 直接 project 文档及已存 conversationCount/lastConversationAt/lastConversationId | 不包含会话正文；用 conversations_list 的 projectId 过滤。计数仅含 retention 可见、未归档会话；GET 不刷新统计 | `projects_get`；mock |
+| POST `/api/projects` | `{name,description?}`；201 project；MCP name 非空且 ≤100、description ≤1000，trim 后送出 | 上游会静默截断超长字段，工具提前拒绝；名称不唯一，无幂等键；不支持 instructions/files/agents/members 等字段 | `projects_create`；mock |
+| PATCH `/api/projects/:projectId` | 只发 changes 中 name/description；200 project；description 空串清除 | 部分更新保留其他字段，无客户端 CAS；拒绝空 changes | `projects_update`；mock minimal patch |
+| DELETE `/api/projects/:projectId` | 200 `{deletedCount,modifiedCount}` | 删除项目并 unset 所属会话的 chatProjectId；**保留会话、消息、文件、Schedule**。非事务，可能部分成功；Schedule 后续检查可能因 project_deleted 停用，不是即时取消生成 | `projects_delete`；mock no conversation-delete call |
+| PUT `/api/projects/conversations/:conversationId` | `{projectId:ObjectId或null}`；`{conversation,previousProjectId,projectId}` | 移动/归属一个项目，明确 null 解除；必须显式传参，不能因漏填而解除。不改归档状态；无 CAS，统计失败可在归属已写入后返回 500 | `conversations_set_project`；mock move/unlink/missing argument |
+
+Project ID 为 24-hex Mongo ObjectId；目标不属于当前用户时返回 unavailable。Project 无归档 API，也无级联删除其所有聊天的专用工具。
 
 ## 共享与可见性
 
@@ -98,7 +135,7 @@ cadence：structured `hourly/daily/weekdays/weekly` + hour/minute/daysOfWeek，�
 
 ## 通用请求与验证边界
 
-`api_request` 转发任意 method/path 或 absolute URL、query、JSON body、headers；没有写入 gate / allowlist，供管理员访问未封装接口。JWT 通过 refreshToken 内部获取，只自动附加到 baseUrl 同源且无显式 Authorization/Cookie 的请求；headers 可显式覆盖，redirect 不跟随；JSON/text 返回。可绕过专用工具输入限制，但不绕过上游认证。自动测试覆盖未知路由 DELETE、绝对 URL、origin 凭据处理、headers/query、错误与无重试。
+`api_request` 转发任意 method/path 或 absolute URL、query、JSON body、headers；没有写入 gate / allowlist，供管理员访问未封装接口。JWT 通过 refreshToken 内部获取，只自动附加到 baseUrl 同源且无显式 Authorization/Cookie 的请求；headers 可显式覆盖，redirect 不跟随；JSON/text 返回。可绕过专用工具输入限制，但不绕过上游认证。自动测试覆盖未知路由 DELETE、绝对 URL、origin 凭据处理、headers/query、错误与无重试。v0.3.0 配置 userAgent 用于 refresh 和普通 API（显式请求 User-Agent 仅覆盖本次 API）。SSE 逐块解析：HTTP 200 的 `event: error` 返回 `UPSTREAM_STREAM_ERROR` / MCP isError，保留脱敏事件 data、停止读流且不重试；也检查未声明 Content-Type 的响应，因为 pinned denyRequest 会如此发出 SSE。显式普通文本 Content-Type 不作 SSE 误判。
 
 ## 源码证据索引
 
@@ -111,4 +148,7 @@ cadence：structured `hourly/daily/weekdays/weekly` + hour/minute/daysOfWeek，�
 - Agents：`api/server/routes/agents/v1.js`、`api/server/controllers/agents/v1.js`、`packages/api/src/agents/validation.ts`、`packages/data-provider/src/schemas.ts`（SkillsScope）。
 - Schedules：`api/server/routes/schedules.js`、`packages/data-provider/src/types/schedules.ts`、`packages/api/src/schedules/handlers.ts`、`packages/api/src/schedules/cadence.ts`。
 - Prompts：`api/server/routes/prompts.js`、`packages/api/src/prompts/schemas.ts`、`packages/api/src/prompts/format.ts`、`packages/data-schemas/src/methods/prompt.ts`、`packages/data-schemas/src/schema/prompt.ts`。
+- Conversations：`api/server/routes/convos.js`、`api/server/middleware/validate/convoAccess.js`、`api/server/middleware/denyRequest.js`、`packages/data-schemas/src/methods/conversation.ts`、`packages/data-schemas/src/schema/convo.ts`。
+- Messages / search：`api/server/routes/messages.js`、`api/server/routes/search.js`、`packages/api/src/middleware/messageValidation.ts`、`packages/data-schemas/src/methods/message.ts`、`packages/data-schemas/src/models/plugins/mongoMeili.ts`；`packages/data-provider/src/api-endpoints.ts` 中 listMessages 的 query/path 选择不能直接用于消息分页。
+- Chat Projects：`api/server/routes/projects.js`、`packages/api/src/projects/handlers.ts`、`packages/data-schemas/src/methods/chatProject.ts`、`packages/data-schemas/src/schema/chatProject.ts`；关联 Schedule 依赖检查见 `packages/api/src/schedules/fire.ts`。
 - Permissions：`api/server/routes/accessPermissions.js`、`api/server/controllers/PermissionsController.js`、`packages/data-provider/src/accessPermissions.ts`。

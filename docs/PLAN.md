@@ -7,9 +7,11 @@ The initial plan was committed as `b903cea` before implementation. The maintaine
 - Existing **public** repository `Ricky-Hao/LibreChat-MCP`; keep its name and visibility.
 - Small trusted-intranet administrator tool, not a public multi-user service.
 - Skills, Agents with Skill bindings, Scheduled Tasks / Cron, Prompt library, visibility/sharing where upstream actually supports it, and run-now.
+- v0.3.0 expansion: Conversation CRUD (metadata-only creation, title update, archive/pin, explicit single deletion), content reads and message search; Chat Project CRUD and explicit conversation assignment. Only authenticated-user ownership exposed by upstream; no cross-user admin bypass, implicit chat generation or bulk-clear tool. Document title-upsert creation and defective timestamp message pagination rather than inventing APIs.
 - All implemented operations available immediately; no read-only mode, policy engine, method/path allowlist or delete/share/run feature gates.
 - Generic tool forwards requests, including unknown future API routes. It has no administrative restrictions. Managed JWT is only attached to the configured origin; no automatic redirects or network/5xx retries.
 - v0.2.0 revision: JSON config contains `baseUrl` and literal `refreshToken` ONLY, no old jwt configuration compatibility. For LibreChat provider mode, obtain an in-memory JWT on first API call and refresh/replay once on explicit 401. Singleflight per client/process, persist rotated refresh cookie atomically into the same config, including after a malformed JWT body. Graceful shutdown drains active refresh/save. No username/password login, OIDC reuse flow or secret-file indirection.
+- Configurable userAgent with the supplied browser default for refresh and API; explicit request User-Agent affects that request only. HTTP-200 SSE error events must fail MCP calls, preserve redacted data and stop reading without retry, including upstream SSE missing Content-Type.
 - Streamable HTTP without authentication by default; optional separate downstream bearer and stdio.
 - npm CLI/package, GitHub Release package, Docker image. No Gateway implementation, Kubernetes deployment, UI, database or multi-version compatibility framework.
 - Focused mock/protocol tests, not exhaustive defensive test suites. No production test resources.
@@ -26,5 +28,6 @@ Official `danny-avila/LibreChat` `dev` was fetched and pinned for this implement
 4. Focused request-mapping and MCP protocol tests — done.
 5. Build/package/container validation and distribution workflows — see STATUS.md.
 6. Refresh-only credential bootstrap/rotation, shared HTTP client, writable directory deployment and focused refresh tests — v0.2.0.
+7. Browser UA, incremental SSE error detection, Conversation/Message/Chat Project route audit and focused semantic tools/tests — v0.3.0; distribution results in STATUS.md.
 
 The authorization remains development/testing/distribution only, not production LibreChat mutations or Gateway deployment. Never commit JWTs, local config, client secrets or production responses.

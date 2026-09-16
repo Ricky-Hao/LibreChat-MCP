@@ -8,10 +8,12 @@ import { agentsTools } from './tools/agents.js';
 import { schedulesTools } from './tools/schedules.js';
 import { promptsTools } from './tools/prompts.js';
 import { permissionsTools } from './tools/permissions.js';
+import { conversationsTools } from './tools/conversations.js';
+import { projectsTools } from './tools/projects.js';
 
 /** Config objects carry no file path: the default client is in-memory; CLI injects a writer. */
 export function createMcpServer(config: Config, api = new LibreChatClient(config)) {
-  const server = new McpServer({ name: 'librechat-mcp', version: '0.2.0' });
+  const server = new McpServer({ name: 'librechat-mcp', version: '0.3.0' });
   const register: Register = (name, description, shape, run, readOnly = false) => {
     const inputSchema = z.strictObject(shape);
     server.registerTool<z.ZodRawShape, typeof inputSchema>(`librechat_${name}`, {
@@ -35,7 +37,7 @@ export function createMcpServer(config: Config, api = new LibreChatClient(config
       return { content: [{ type: 'text' as const, text: JSON.stringify(safe) }], isError };
     });
   };
-  for (const tools of [skillsTools, agentsTools, schedulesTools, promptsTools, permissionsTools]) tools(register, api);
+  for (const tools of [skillsTools, agentsTools, schedulesTools, promptsTools, permissionsTools, conversationsTools, projectsTools]) tools(register, api);
   const scalar = z.union([z.string(), z.number(), z.boolean()]);
   register('api_request', 'Forward an API request without endpoint allowlists or write restrictions. Relative paths use baseUrl. Absolute URLs are allowed; managed JWT is attached only to the baseUrl origin. Returns JSON/text and HTTP status; redirects are returned, not followed. This can modify, delete, share or execute anything the upstream user may access.', {
     method: z.string().default('GET'), path: z.string().optional(), url: z.string().optional(),

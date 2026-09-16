@@ -3,6 +3,8 @@ import { resolve, dirname, basename, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
+export const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0';
+
 export const configSchema = z.strictObject({
   baseUrl: z.url().refine((s) => {
     const u = new URL(s);
@@ -14,6 +16,7 @@ export const configSchema = z.strictObject({
   port: z.number().int().min(0).max(65535).default(3000),
   authToken: z.string().min(1).optional(),
   timeoutMs: z.number().int().positive().default(30_000),
+  userAgent: z.string().regex(/^[^\r\n]+$/, 'userAgent must be a non-empty single-line header').default(DEFAULT_USER_AGENT),
 });
 export type Config = z.infer<typeof configSchema>;
 

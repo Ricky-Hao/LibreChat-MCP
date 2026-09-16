@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LibreChatClient, ApiError, redact } from '../src/client.js';
-import { loadConfig, configSchema } from '../src/config.js';
+import { loadConfig, configSchema, DEFAULT_USER_AGENT } from '../src/config.js';
 import { mockApi, config, jwt, refreshToken } from './helpers.js';
 
 test('JSON configuration, defaults and non-leaking errors', async (t) => {
@@ -15,6 +15,7 @@ test('JSON configuration, defaults and non-leaking errors', async (t) => {
   await writeFile(path, JSON.stringify({ baseUrl: 'http://localhost:3080', refreshToken }));
   assert.equal((await loadConfig(path)).transport, 'http');
   assert.equal((await loadConfig(path)).authToken, undefined);
+  assert.equal((await loadConfig(path)).userAgent, DEFAULT_USER_AGENT);
   assert.equal(configSchema.safeParse({ baseUrl: 'file:///tmp', refreshToken }).success, false);
   assert.equal(configSchema.safeParse({ baseUrl: 'http://localhost', jwt }).success, false); // no legacy jwt configuration
   await writeFile(path, JSON.stringify({ baseUrl: 'http://localhost', refreshToken: { secret: refreshToken } }));
@@ -31,6 +32,21 @@ test('generic forwarding supports new routes, query arrays, arbitrary JSON, head
   assert.equal(upstream.seen[0].path, '/librechat/api/new-in-dev?tag=a&tag=b&limit=2');
   assert.equal(upstream.seen[0].headers.authorization, `Bearer ${jwt}`);
   assert.equal(upstream.seen[0].headers['x-custom'], 'test');
+});
+
+test('configured/default User-Agent is sent on refresh and API replays; explicit header overrides only that request', async (t) => {
+  for (const userAgent of [DEFAULT_USER_AGENT, 'CustomBrowser/1.0']) {
+    const upstream = await mockApi(t, (_r, res) => { res.statusCode = 401; return {}; });
+    const settings = userAgent === DEFAULT_USER_AGENT ? config(upstream.origin) : configSchema.parse({ ...config(upstream.origin), userAgent });
+    const api = new LibreChatClient(settings);
+    await assert.rejects(api.request({ path: '/api/test' }), (e: ApiError) => e.status === 401);
+    assert.equal(upstream.authSeen.length, 2);
+    assert.equal(upstream.seen.length, 2);
+    for (const request of [...upstream.authSeen, ...upstream.seen]) assert.equal(request.headers['user-agent'], userAgent);
+    await assert.rejects(api.request({ path: '/api/test', headers: { 'UsEr-AgEnT': 'OverrideBrowser/2.0' } }), (e: ApiError) => e.status === 401);
+    assert.equal(upstream.authSeen.at(-1)!.headers['user-agent'], userAgent);
+    for (const request of upstream.seen.slice(-2)) assert.equal(request.headers['user-agent'], 'OverrideBrowser/2.0');
+  }
 });
 
 test('absolute external requests are allowed but do not inherit configured JWT; redirects are not followed', async (t) => {
