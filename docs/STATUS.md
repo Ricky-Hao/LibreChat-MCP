@@ -22,9 +22,9 @@
 
 - `npm run check`, `npm run build`: passed.
 - `npm test`: 31 grouped tests passed, including User-Agent forwarding, 3 SSE cases, 5 Conversation/Message groups, Chat Project mapping and 8 refresh/persistence/concurrency/shutdown cases. Covers config, generic forwarding, credentials/redirects, 401/403/404/409/429/500, interrupted/timeout writes, cancellation between dependent requests, key CRUD/merge/version/permission semantics, pagination, MCP HTTP + stdio initialize/discover/call and protocol errors. Mocks do not prove live ACLs, database cascades or Meili indexing.
-- `npm pack`: passed; package allowlist includes built code/docs/example, excludes local configuration/tests/source/dev caches.
+- `npm pack --dry-run`: passed locally; CI/release also packed the artifact. Package allowlist includes built code/docs/example, excludes local configuration/tests/source/dev caches. Built-bundle discovery verified 56 unique tools without an upstream connection.
 - `docker build -t librechat-mcp:0.2.0 .`: passed on Node 22. Real container smoke with a mock upstream verified refresh-only bootstrap, UID 1000 runtime, atomic cookie save with 0600 permissions, and restart using the saved rotated cookie. Both containers/temp files removed. Default config path is `/config/config.json`, requiring a writable directory mount.
-- Installed the packed `.tgz` in an isolated temporary directory; CLI executable passed.
+- Installed the published v0.3.0 `.tgz` in an isolated temporary prefix; version and CLI executable passed. Public v0.3.0 image pulled without Docker credentials; health, real HTTP MCP initialize/discovery of 56 tools, version and UID 1000 verified. No upstream requests; temporary container/config/install directories removed.
 - Historical v0.2.0 container smoke with synthetic configuration: health check, real MCP initialization and discovery of all 40 tools passed; runtime UID verified as 1000. Container and temporary files removed afterward.
 - Remote CI/release results are recorded in the delivery report rather than treated as live upstream integration.
 
@@ -45,6 +45,16 @@
 - Agent Gateway / Kubernetes integration and network isolation.
 - Compatibility with dev commits newer than `21a9edbe7481fd4de180b45922a2468fdcf79ea3`.
 - No production business resources were created, edited, deleted, shared or triggered.
+
+## Published v0.3.0
+
+- Source/tag commit: `f3b4e955bf51dcaa973f7c7b125e388afe034a91`; tag `v0.3.0`. The unreleased v0.2.1 UA fix was folded into this expanded feature release.
+- [CI](https://github.com/Ricky-Hao/LibreChat-MCP/actions/runs/35046452711) and [Release workflow](https://github.com/Ricky-Hao/LibreChat-MCP/actions/runs/35046527088): passed, including all 31 tests and Node 22 Docker build.
+- [Release package](https://github.com/Ricky-Hao/LibreChat-MCP/releases/tag/v0.3.0) downloaded anonymously and installed; SHA-256 matches GitHub's asset digest: `5c32c957cfc38f98cbbfb9b5d389a3aaf144b8cd52e423050a9ef2280522f94d`.
+- Public `ghcr.io/ricky-hao/librechat-mcp:0.3.0` / `latest` published. Anonymous versioned pull, runtime UID 1000, health, MCP initialization/version and discovery of all 56 tools verified.
+- Image digest: `sha256:1d30b33eaa3ca33825b7eba5854e459a9a66aceba8328fad4997426173c9303a`.
+- Existing v0.2.0 refreshToken configuration remains valid; userAgent is optional/defaulted. Retain writable configuration directory and single-replica operation; restart to load changes. NPM_TOKEN was not configured, so npm registry publication was skipped.
+- No live LibreChat/Gateway integration or production resource mutations were performed.
 
 ## Published v0.2.0
 
