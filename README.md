@@ -39,7 +39,7 @@ MCP 地址：`http://<host>:3000/mcp`。健康检查：`GET /healthz`，只返�
 GitHub Release 提供可直接安装的 `.tgz` npm 包，不依赖 npm registry 登录：
 
 ```sh
-curl -fL -o librechat-mcp.tgz https://github.com/Ricky-Hao/LibreChat-MCP/releases/download/v0.3.0/ricky-hao-librechat-mcp-0.3.0.tgz
+curl -fL -o librechat-mcp.tgz https://github.com/Ricky-Hao/LibreChat-MCP/releases/download/v0.3.1/ricky-hao-librechat-mcp-0.3.1.tgz
 npm install -g ./librechat-mcp.tgz
 librechat-mcp --config ./config.json
 ```
@@ -57,7 +57,7 @@ chmod 600 config/config.json
 docker run --rm --name librechat-mcp \
   -p 127.0.0.1:3000:3000 \
   -v "$PWD/config:/config" \
-  ghcr.io/ricky-hao/librechat-mcp:0.3.0
+  ghcr.io/ricky-hao/librechat-mcp:0.3.1
 ```
 
 容器以非 root 的 `node` 用户（UID 1000）运行，配置目录与文件需归该 UID 所有且可写（必要时调整 ownership）。必须挂载**整个可写目录**，不能使用旧版的单文件或 `:ro` 挂载：刷新会以临时文件 + rename 原子保存轮换后的 refreshToken。容器内配置 `host: "0.0.0.0"`，健康检查固定使用端口 3000。
@@ -156,6 +156,12 @@ server.listen(config.port, config.host);
 | 会话项目归属 | `conversations_set_project` |
 | 共享 / 可见性 | `permissions_roles`, `permissions_get`, `permissions_update`, `visibility_set` |
 | 通用 | `api_request` |
+
+### Agent 响应精简（v0.3.1）
+
+自 v0.3.1 起， `agents_get`、`agents_create`、`agents_update`、`agents_set_skills` 只移除当前 Agent 顶层的 `versions` 历史数组，保留当前 `version` 及配置，不额外请求上游、不修改存储或原始响应。用户配置内同名字段不受影响；缺少历史或非预期响应保持原有行为。
+
+历史通过 `agents_versions` 显式读取，因此不增加 `includeVersions` 参数，也不补造上游 GET 未返回的历史。依赖常规工具 `data.versions` 的调用者需切换到历史工具。**v0.3.0 镜像/包不包含此优化，需要升级到 v0.3.1。** 核查依据、兼容性和合成响应字节数对比见 [Changelog](docs/CHANGELOG.md)。
 
 ### 关键语义
 

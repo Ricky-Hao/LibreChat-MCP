@@ -13,7 +13,7 @@ import { projectsTools } from './tools/projects.js';
 
 /** Config objects carry no file path: the default client is in-memory; CLI injects a writer. */
 export function createMcpServer(config: Config, api = new LibreChatClient(config)) {
-  const server = new McpServer({ name: 'librechat-mcp', version: '0.3.0' });
+  const server = new McpServer({ name: 'librechat-mcp', version: '0.3.1' });
   const register: Register = (name, description, shape, run, readOnly = false) => {
     const inputSchema = z.strictObject(shape);
     server.registerTool<z.ZodRawShape, typeof inputSchema>(`librechat_${name}`, {

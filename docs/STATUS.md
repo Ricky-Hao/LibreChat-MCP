@@ -1,5 +1,12 @@
 # Delivery status
 
+## v0.3.1
+
+- Response-only Agent history trimming in get/create/update/set-skills; explicit agents_versions and generic requests remain unchanged. No additional upstream requests, input schema changes or storage mutations.
+- Preserves current version/configuration, nested version fields, diagnostics and original response objects. Other resources were audited but not changed in this release.
+- Local type-check, 35 mock/protocol tests and build passed. Synthetic 30-version MCP response: 459,013 → 488 UTF-8 JSON bytes (99.89% reduction for that fixture, not a token/performance claim). See CHANGELOG.md.
+- No live LibreChat/Gateway integration, production Agent changes or task execution.
+
 ## v0.3.0
 
 - Adds `userAgent` JSON configuration with the requested Windows Edge/Chrome 153 default. Applied to internal refresh calls and all API requests/replays; explicit generic-request User-Agent overrides only that request.
@@ -21,7 +28,7 @@
 ## Local validation
 
 - `npm run check`, `npm run build`: passed.
-- `npm test`: 31 grouped tests passed, including User-Agent forwarding, 3 SSE cases, 5 Conversation/Message groups, Chat Project mapping and 8 refresh/persistence/concurrency/shutdown cases. Covers config, generic forwarding, credentials/redirects, 401/403/404/409/429/500, interrupted/timeout writes, cancellation between dependent requests, key CRUD/merge/version/permission semantics, pagination, MCP HTTP + stdio initialize/discover/call and protocol errors. Mocks do not prove live ACLs, database cascades or Meili indexing.
+- `npm test`: 35 grouped tests passed, including 4 Agent response-projection groups, User-Agent forwarding, 3 SSE cases, 5 Conversation/Message groups, Chat Project mapping and 8 refresh/persistence/concurrency/shutdown cases. Covers config, generic forwarding, credentials/redirects, 401/403/404/409/429/500, interrupted/timeout writes, cancellation between dependent requests, key CRUD/merge/version/permission semantics, pagination, MCP HTTP + stdio initialize/discover/call and protocol errors. Mocks do not prove live ACLs, database cascades or Meili indexing.
 - `npm pack --dry-run`: passed locally; CI/release also packed the artifact. Package allowlist includes built code/docs/example, excludes local configuration/tests/source/dev caches. Built-bundle discovery verified 56 unique tools without an upstream connection.
 - `docker build -t librechat-mcp:0.2.0 .`: passed on Node 22. Real container smoke with a mock upstream verified refresh-only bootstrap, UID 1000 runtime, atomic cookie save with 0600 permissions, and restart using the saved rotated cookie. Both containers/temp files removed. Default config path is `/config/config.json`, requiring a writable directory mount.
 - Installed the published v0.3.0 `.tgz` in an isolated temporary prefix; version and CLI executable passed. Public v0.3.0 image pulled without Docker credentials; health, real HTTP MCP initialize/discovery of 56 tools, version and UID 1000 verified. No upstream requests; temporary container/config/install directories removed.
