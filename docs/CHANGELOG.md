@@ -2,7 +2,7 @@
 
 ## v0.4.0 — bounded stored-message reads
 
-Release candidate/source implementation; publication and deployment status are verified separately.
+[Package/image publication is verified](STATUS.md#published-v040); production deployment and real-message retesting remain unperformed.
 
 **Migration:** remove calls to `librechat_conversations_messages_list` and `librechat_conversations_messages_read`. Use `librechat_messages_list` → `librechat_messages_content` → `librechat_messages_read`, with cursor-only continuation. Requires the paired LibreChat `/api/message-reads` v2 API; incompatible upstream fails closed, without full-message fallback or compatibility aliases. Conversation resource operations, Agents registrations and other resource tools are unchanged.
 

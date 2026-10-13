@@ -1,6 +1,6 @@
 # Bounded message analysis
 
-The v0.4.0 release candidate/source implementation provides three read-only tools requiring the paired LibreChat v2 API. Original source baselines: LibreChat `78e40464e4df7f36f1110e7258de54f47259c8e5`, MCP `0ac84637d6eafddcc5a25520176d65f66a720243`; these are not implementation commits. Publication and deployment status are verified separately.
+The v0.4.0 source implementation provides three read-only tools requiring the paired LibreChat v2 API. Original source baselines: LibreChat `78e40464e4df7f36f1110e7258de54f47259c8e5`, MCP `0ac84637d6eafddcc5a25520176d65f66a720243`; these are not implementation commits. [Package/image publication is verified](STATUS.md#published-v040); production deployment and real-message retesting remain unperformed.
 
 For the upstream rationale, complete LibreChat patch manifest, writer audit, implementation-commit lookup and future-port runbook, see `docs/mcp-message-reads-patch.md` in the paired LibreChat checkout (`../LibreChat/docs/mcp-message-reads-patch.md` from this repository root when checked out as siblings). This checkout-relative pointer does not depend on a particular published branch.
 
