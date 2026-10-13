@@ -6,11 +6,12 @@ import { resolve } from 'node:path';
 import { createServer } from 'node:http';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { createHttpServer } from '../dist/http.js';
 import { MESSAGE_HTTP_BYTES, MESSAGE_MCP_BYTES } from '../src/tools/message-reads.js';
 import { listen, config, output, jwt, refreshToken } from './helpers.js';
 
 test('production LibreChat handler/database -> HTTP -> real MCP transport stays bounded for a giant stored message', { timeout: 120_000 }, async (t) => {
+  // Typecheck against source before build; explicitly exercise the compiled module at runtime.
+  const { createHttpServer }: typeof import('../src/http.js') = await import(new URL('../dist/http.js', import.meta.url).href);
   assert.ok(process.env.LIBRECHAT_SOURCE_ROOT, 'Set LIBRECHAT_SOURCE_ROOT to the authorized local LibreChat checkout');
   const root = resolve(process.env.LIBRECHAT_SOURCE_ROOT!);
   // Upstream singleton loggers otherwise create api/logs in this checkout on import.

@@ -9,9 +9,10 @@ import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { messageReadTools } from '../dist/tools/message-reads.js';
 
 test('measure compiled current and preserved first-design reader discovery schemas', async () => {
+  // Typecheck against source before build; explicitly exercise the compiled module at runtime.
+  const { messageReadTools }: typeof import('../src/tools/message-reads.js') = await import(new URL('../dist/tools/message-reads.js', import.meta.url).href);
   assert.ok(process.env.MESSAGE_READ_BASELINE_DIR, 'Provide the authorized pre-redesign source artifact directory');
   const beforeServer = new McpServer({ name: 'before', version: '1' });
   const afterServer = new McpServer({ name: 'after', version: '2' });
