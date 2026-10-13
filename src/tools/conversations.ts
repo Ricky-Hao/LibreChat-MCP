@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Query } from '../client.js';
+import { ApiError } from '../client.js';
 import { objectId, requireResource, segment, type Tools } from './common.js';
 
 const conversationId = z.string().trim().min(1).describe('Conversation ID returned by LibreChat');
-const messageId = z.string().trim().min(1).describe('Stored message ID');
 const title = z.string().trim().max(1024);
 const sortDirection = z.enum(['asc', 'desc']);
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -30,17 +30,6 @@ export const conversationsTools: Tools = (tool, api) => {
     await api.request({ path: `/api/convos/${segment(conversationId)}` }),
     (data) => matches(data, conversationId), false,
   ), true);
-
-  tool('conversations_messages_list', 'Page stored messages using the root /api/messages query route; returns the upstream envelope unchanged. pageSize has a local safety cap of 1000. Upstream timestamp cursors may skip timestamp ties or lose milliseconds; use conversations_messages_read for a complete transcript.', {
-    conversationId, cursor: z.string().optional(), pageSize: z.number().int().min(1).max(1000).default(25),
-    sortBy: z.enum(['createdAt', 'updatedAt']).default('createdAt'), sortDirection: sortDirection.default('asc'),
-  }, (input) => api.request({ path: '/api/messages', query: query(input) }), true);
-
-  tool('conversations_messages_read', 'Read the full, unbounded array of stored messages across ALL branches, not just the active branch. Preserves structured content and parent IDs. Optional messageId returns a zero-or-one array via the narrower path.', {
-    conversationId, messageId: messageId.optional(),
-  }, ({ conversationId, messageId }) => api.request({
-    path: `/api/messages/${segment(conversationId)}${messageId === undefined ? '' : `/${segment(messageId)}`}`,
-  }), true);
 
   tool('messages_search', 'Search owned messages, including archived conversations, via Meili. Requires the upstream search index and may reflect stale/incomplete indexing. Returns the upstream envelope; limit caps hits at 1000, with no cursor or further pagination.', {
     query: z.string().trim().min(1), limit: z.number().int().min(1).max(1000).default(25),

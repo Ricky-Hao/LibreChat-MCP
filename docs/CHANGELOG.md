@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.4.0 — bounded stored-message reads
+
+Release candidate/source implementation; publication and deployment status are verified separately.
+
+**Migration:** remove calls to `librechat_conversations_messages_list` and `librechat_conversations_messages_read`. Use `librechat_messages_list` → `librechat_messages_content` → `librechat_messages_read`, with cursor-only continuation. Requires the paired LibreChat `/api/message-reads` v2 API; incompatible upstream fails closed, without full-message fallback or compatibility aliases. Conversation resource operations, Agents registrations and other resource tools are unchanged.
+
+- Three dedicated tools: `messages_list`, `messages_content`, `messages_read`; 57 source tools total. No dedicated full-message reader or compatibility aliases. Requires `/api/message-reads/{list,content,read}` protocol v2.
+- Mongo metadata/descriptor/selected-field projections and substring windows reduce Node materialization. HMAC cursor-only continuation binds scope and writer-maintained revision; unversioned raw DB writes are outside the consistency guarantee.
+- Whole-response UTF-8 budgets and MCP backstops remain enforced; incompatible upstream fails closed. Stored usage/finish reasons retain absence and historical types. Browser-facing message APIs remain intact.
+- List pages identify their conversation and unavailable reliable call counts once per response. Discovery schemas explain start selectors and align UTC fractions with upstream; stored function/code-interpreter names are bounded and recoverable through entry reads.
+- [Contract, usage semantics, gateway evidence and examples](BOUNDED-MESSAGE-READS.md). Local checks are not proof of artifact publication or a live deployment.
+
 ## v0.3.1 — Agent 当前状态响应精简
 
 v0.3.0 安装包/镜像不包含此 MCP 层优化。此版本经授权发布安装包及镜像，不部署、不修改生产 Agent 或触发真实任务。发布验证记录见 [STATUS.md](STATUS.md)。

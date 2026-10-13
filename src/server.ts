@@ -10,10 +10,11 @@ import { promptsTools } from './tools/prompts.js';
 import { permissionsTools } from './tools/permissions.js';
 import { conversationsTools } from './tools/conversations.js';
 import { projectsTools } from './tools/projects.js';
+import { messageReadTools, guardedMessageTools, MESSAGE_MCP_BYTES } from './tools/message-reads.js';
 
 /** Config objects carry no file path: the default client is in-memory; CLI injects a writer. */
 export function createMcpServer(config: Config, api = new LibreChatClient(config)) {
-  const server = new McpServer({ name: 'librechat-mcp', version: '0.3.1' });
+  const server = new McpServer({ name: 'librechat-mcp', version: '0.4.0' });
   const register: Register = (name, description, shape, run, readOnly = false) => {
     const inputSchema = z.strictObject(shape);
     server.registerTool<z.ZodRawShape, typeof inputSchema>(`librechat_${name}`, {
@@ -28,16 +29,20 @@ export function createMcpServer(config: Config, api = new LibreChatClient(config
       } catch (error) {
         isError = true;
         output = error instanceof ApiError ? {
-          error: { code: error.code, message: error.message, status: error.status, data: error.data, uncertain: error.uncertain },
+          error: guardedMessageTools.has(name) ? { code: error.code, message: error.message } : { code: error.code, message: error.message, status: error.status, data: error.data, uncertain: error.uncertain },
         } : { error: { code: 'INTERNAL_ERROR', message: 'Operation failed. Check configuration and input; inspect resource state before retrying a write.' } };
       }
-      // Metadata only. Never log configuration, input, URLs, body or exception objects.
-      process.stderr.write(JSON.stringify({ tool: `librechat_${name}`, durationMs: Date.now() - started, outcome: isError ? 'error' : 'ok' }) + '\n');
       const safe = api.redact(output, [config.authToken ?? '']);
-      return { content: [{ type: 'text' as const, text: JSON.stringify(safe) }], isError };
+      let result = { content: [{ type: 'text' as const, text: JSON.stringify(safe) }], isError };
+      if (guardedMessageTools.has(name) && Buffer.byteLength(JSON.stringify({ jsonrpc: '2.0', id: extra.requestId, result })) > MESSAGE_MCP_BYTES) {
+        result = { content: [{ type: 'text' as const, text: JSON.stringify({ error: { code: 'MESSAGE_READ_TOO_LARGE', message: 'Serialized MCP response exceeded its budget. Restart messages_list/content/read with a smaller limit or maxBytes.' } }) }], isError: true };
+      }
+      // Metadata only. Log the final result, including envelope-guard failures.
+      process.stderr.write(JSON.stringify({ tool: `librechat_${name}`, durationMs: Date.now() - started, outcome: result.isError ? 'error' : 'ok' }) + '\n');
+      return result;
     });
   };
-  for (const tools of [skillsTools, agentsTools, schedulesTools, promptsTools, permissionsTools, conversationsTools, projectsTools]) tools(register, api);
+  for (const tools of [skillsTools, agentsTools, schedulesTools, promptsTools, permissionsTools, conversationsTools, projectsTools, messageReadTools]) tools(register, api);
   const scalar = z.union([z.string(), z.number(), z.boolean()]);
   register('api_request', 'Forward an API request without endpoint allowlists or write restrictions. Relative paths use baseUrl. Absolute URLs are allowed; managed JWT is attached only to the baseUrl origin. Returns JSON/text and HTTP status; redirects are returned, not followed. This can modify, delete, share or execute anything the upstream user may access.', {
     method: z.string().default('GET'), path: z.string().optional(), url: z.string().optional(),

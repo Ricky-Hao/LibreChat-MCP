@@ -9,6 +9,9 @@ export interface ApiRequest {
   query?: Query;
   body?: unknown;
   headers?: Record<string, string>;
+  /** Internal read-tool guard; never exposed by the generic request tool. */
+  maxResponseBytes?: number;
+  messageReadsCapability?: boolean;
 }
 export interface ApiResponse<T = unknown> { status: number; data: T }
 
@@ -27,7 +30,33 @@ function parseText(text: string): unknown {
 }
 
 /** SSE can fail at the application layer after successful HTTP headers. */
-async function readBody(response: Response, write: boolean): Promise<string> {
+async function readBody(response: Response, write: boolean, maxBytes?: number): Promise<string> {
+  if (maxBytes !== undefined && response.body) {
+    const mediaType = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
+    const decoder = new TextDecoder();
+    const parser = response.ok && (!mediaType || mediaType === 'text/event-stream') ? createParser({ onEvent(event) {
+      if (event.event === 'error') throw new ApiError('UPSTREAM_STREAM_ERROR', 'Upstream emitted an SSE error while reading messages. Use bounded metadata/entries/body reads with the matching API.', response.status);
+    } }) : undefined;
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          parser?.feed(decoder.decode() + '\n\n');
+          return Buffer.concat(chunks).toString('utf8');
+        }
+        size += value.byteLength;
+        if (size > maxBytes) throw new ApiError('MESSAGE_READ_TOO_LARGE', 'Message response exceeded the read budget. Restart messages_list/content/read with a smaller limit or maxBytes.');
+        chunks.push(value);
+        parser?.feed(decoder.decode(value, { stream: true }));
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+  }
   const mediaType = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
   // LibreChat denyRequest can emit SSE without setting Content-Type.
   if (!response.ok || (mediaType && mediaType !== 'text/event-stream') || !response.body) {
@@ -168,7 +197,7 @@ export class LibreChatClient {
     }
   }
 
-  async request<T = unknown>({ method = 'GET', path, query, body, headers = {} }: ApiRequest): Promise<ApiResponse<T>> {
+  async request<T = unknown>({ method = 'GET', path, query, body, headers = {}, maxResponseBytes, messageReadsCapability }: ApiRequest): Promise<ApiResponse<T>> {
     const parentSignal = this.context.getStore();
     const checkCancelled = () => {
       if (this.closed || parentSignal?.aborted) throw new ApiError('CANCELLED', 'Call cancelled before sending this request.');
@@ -200,7 +229,11 @@ export class LibreChatClient {
           redirect: 'manual',
           signal: AbortSignal.any([AbortSignal.timeout(this.config.timeoutMs), ...(parentSignal ? [parentSignal] : [])]),
         });
-        const data = parseText(await readBody(response, write));
+        if (messageReadsCapability && response.status !== 401 && response.headers.get('x-librechat-message-reads') !== '2') {
+          await response.body?.cancel();
+          throw new ApiError('BOUNDED_READ_UNSUPPORTED', 'The upstream did not advertise bounded message reads v2. No full-message fallback is available.', response.status);
+        }
+        const data = parseText(await readBody(response, write, maxResponseBytes));
         return { response, data, generation };
       } catch (error) {
         if (error instanceof ApiError) throw error;
@@ -216,6 +249,12 @@ export class LibreChatClient {
     }
     const { response, data } = result;
     if (!response.ok) {
+      if (messageReadsCapability) {
+        const code = data && typeof data === 'object' && 'error' in data && data.error && typeof data.error === 'object' && 'code' in data.error ? data.error.code : undefined;
+        const allowed = ['INVALID_REQUEST', 'INVALID_CURSOR', 'STALE_CURSOR', 'NOT_FOUND', 'ITEM_TOO_LARGE', 'UNSUPPORTED_CONTENT', 'FIELD_NOT_RECORDED', 'UNAVAILABLE', 'UNAUTHORIZED'];
+        throw new ApiError(typeof code === 'string' && allowed.includes(code) ? code : 'BOUNDED_READ_FAILED',
+          code === 'STALE_CURSOR' ? 'Message changed. Restart bounded entries/body reading without cursor or version.' : 'Bounded read failed. Check scope and parameters; discover fields with metadata/entries. No full-message fallback was attempted.', response.status);
+      }
       throw new ApiError(
         response.status === 409 ? 'CONFLICT' : 'UPSTREAM_ERROR',
         response.status === 401 && canRefresh ? 'LibreChat JWT was rejected after refresh; check the user/session and replace refreshToken from a new login if needed.' : `Upstream HTTP ${response.status}`,

@@ -57,20 +57,14 @@ test('conversation listing forwards repeated filters/cursors; metadata and root-
   assert.equal(h.last().path, '/api/convos/convo%2Fwith%20space');
   wrongMetadata = true;
   unexpected(await h.call('conversations_get', { conversationId }), false);
-  assert.deepEqual(output(await h.call('conversations_messages_list', { conversationId })).data, page);
-  assert.equal(h.last().path, '/api/messages?conversationId=convo%2Fwith+space&pageSize=25&sortBy=createdAt&sortDirection=asc');
-  await h.call('conversations_messages_list', { conversationId, cursor: page.nextCursor, pageSize: 1000, sortBy: 'updatedAt', sortDirection: 'desc' });
-  assert.equal(h.last().path, '/api/messages?conversationId=convo%2Fwith+space&cursor=2030-01-01T00%3A00%3A00.123Z&pageSize=1000&sortBy=updatedAt&sortDirection=desc');
   const count = h.seen.length;
   for (const [name, args] of [
     ['conversations_list', { projectId: 'invalid' }], ['conversations_list', { limit: 101 }],
-    ['conversations_messages_list', { conversationId, pageSize: 1001 }],
-    ['conversations_messages_list', { conversationId, sortBy: 'endpoint' }],
   ] as const) assert.equal((await h.call(name, args)).isError, true);
   assert.equal(h.seen.length, count);
 });
 
-test('full reads preserve all stored branches and zero-or-one arrays; bounded search uses only root messages query', async (t) => {
+test('independent indexed search uses only the existing root messages query', async (t) => {
   const search = { messages: [{ ...messages[2], isArchived: true }], nextCursor: null, upstreamField: 'kept' };
   const h = await setup(t, (r) => {
     if (r.path.startsWith('/api/messages?')) return search;
@@ -78,11 +72,6 @@ test('full reads preserve all stored branches and zero-or-one arrays; bounded se
     if (r.path.endsWith('/branch%2Fa')) return [messages[1]];
     return messages;
   });
-  assert.deepEqual(output(await h.call('conversations_messages_read', { conversationId })).data, messages);
-  assert.equal(h.last().path, '/api/messages/convo%2Fwith%20space');
-  assert.deepEqual(output(await h.call('conversations_messages_read', { conversationId, messageId: ' branch/a ' })).data, [messages[1]]);
-  assert.equal(h.last().path, '/api/messages/convo%2Fwith%20space/branch%2Fa');
-  assert.deepEqual(output(await h.call('conversations_messages_read', { conversationId, messageId: 'missing' })).data, []);
   assert.deepEqual(output(await h.call('messages_search', { query: '  archived needle  ' })).data, search);
   assert.equal(h.last().path, '/api/messages?search=archived+needle&pageSize=25');
   await h.call('messages_search', { query: 'x&y', limit: 1000 });
@@ -91,11 +80,9 @@ test('full reads preserve all stored branches and zero-or-one arrays; bounded se
   for (const args of [{ query: ' ' }, { query: 'x', limit: 1001 }, { query: 'x', limit: 0 }, { query: 'x', cursor: 'fake' }, { query: 'x', conversationId }, { query: 'x', sortBy: 'createdAt' }]) {
     assert.equal((await h.call('messages_search', args)).isError, true);
   }
-  assert.equal((await h.call('conversations_messages_read', { conversationId, messageId: ' ' })).isError, true);
   assert.equal(h.seen.length, count);
   assert.ok(h.seen.every((r) => r.method === 'GET' && r.path.startsWith('/api/messages')));
   const tools = (await h.client.listTools()).tools;
-  assert.match(tools.find((tool) => tool.name === 'librechat_conversations_messages_list')!.description!, /timestamp ties.*milliseconds/);
   assert.match(tools.find((tool) => tool.name === 'librechat_messages_search')!.description!, /Meili.*stale/);
 });
 
@@ -213,7 +200,7 @@ test('single deletion has an exact payload, rejects dangerous inputs before HTTP
   ]) assert.equal((await h.call('conversations_delete', args)).isError, true);
   // The same trimmed, nonblank ID schema protects the other named tools too.
   for (const [name, args] of [
-    ['conversations_get', {}], ['conversations_messages_list', {}], ['conversations_messages_read', {}],
+    ['conversations_get', {}],
     ['conversations_update', { title: 'x' }], ['conversations_set_archived', { isArchived: true }], ['conversations_set_pinned', { pinned: false }],
   ] as const) assert.equal((await h.call(name, { ...args, conversationId: ' ' })).isError, true);
   assert.equal(h.seen.length, count);

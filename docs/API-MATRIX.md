@@ -93,8 +93,10 @@ cadence：structured `hourly/daily/weekdays/weekly` + hour/minute/daysOfWeek，�
 |---|---|---|---|
 | GET `/api/convos` | `limit` 默认 25 / 最大 100，`cursor,isArchived,pinned,tags,search,sortBy,sortDirection,projectId`；`{conversations,nextCursor}` | `isArchived=false` 只列未归档、true 只列归档；pinned=false 不过滤；tags 重复键匹配任一标签；projectId 为 ObjectId 或 `unassigned`。同一遍历保持过滤/排序不变 | `conversations_list`；mock query/cursor |
 | GET `/api/convos/:conversationId` | conversation 文档；messages 仅引用，不是正文 | owner-scoped；404 unavailable；不调用 gen_title（后者会消费缓存）。metadata 和消息读取的 retention 检查并不完全一致 | `conversations_get`；mock |
-| GET `/api/messages?conversationId=...` | `pageSize,cursor,sortBy,sortDirection`；`{messages,nextCursor}`；工具默认 25 / createdAt / asc，本地 pageSize 上限 1000 | 必须是根路径 query。上游单字段时间游标无 ID tie-breaker，且日期字符串可能丢毫秒，会漏同值消息；不能保证遍历完整 | `conversations_messages_list`；mock root query/structured content |
-| GET `/api/messages/:conversationId[/:messageId]` | 完整消息数组；可选 messageId 返回零或一项数组，空数组不伪报 404 | 完整读取无分页、大小无界；包括全部存储分支，保留 parentMessageId/text/content/files 等，不扁平化为单线对话 | `conversations_messages_read`；mock path/branches |
+| GET `/api/messages?conversationId=...` / `/api/messages/:conversationId[/:messageId]` | 浏览器原有正文接口 | 保留；非有界分析路径，无专用 MCP 全量读取工具 | 仅通用 API |
+| GET `/api/message-reads/list` | 正向投影 metadata/usage；可选 messageId 精确查询，includeContext 显式开启；页级 conversationId/observability | 时间戳+ID live cursor、全分支、完整 UTF-8 响应预算；可靠调用次数未持久化，不伪造数值 | `messages_list` |
+| GET `/api/message-reads/content` | Mongo 有限索引窗口中的描述符；kind all/tools、显式 ancestry | 不加载巨大正文；ref 绑定写入版本；私有 child thread 禁止 | `messages_content` |
+| GET `/api/message-reads/read` | ref + field/index；续页仅 cursor | Mongo 字符串窗口；结构化值仅加载所选字段；版本与数据同次查询 | `messages_read` |
 | GET `/api/messages?search=...&pageSize=...` | 工具 query → search、limit → pageSize，默认 25 / 最大 1000；`{messages,nextCursor:null}` | Meili 全文搜索；含归档会话。无可用搜索分页、无 conversationId 联合过滤（传 ID 会绕过搜索）；不伪造 total/cursor。保留上游命中数据和中央凭据脱敏，不额外宣称与普通消息读取投影相同 | `messages_search`；mock mapping/errors |
 | GET `/api/search/enable` | JSON boolean | SEARCH 开关及 Meili 健康检查，不代表索引完整；不是搜索接口 | 通用 `api_request`，无自动 preflight/gate |
 | POST `/api/convos/update`（创建） | `{arg:{conversationId,title}}`；201 conversation | **没有专门空会话创建 API**。工具生成新 UUID，利用 pinned 标题接口 upsert 创建仅 metadata 的会话；无模型调用，无 create-only/CAS 保证，无跨调用幂等键；验证返回 ID/title | `conversations_create`；mock UUID/no chat call |
@@ -102,6 +104,8 @@ cadence：structured `hourly/daily/weekdays/weekly` + hour/minute/daysOfWeek，�
 | POST `/api/convos/archive` | `{arg:{conversationId,isArchived:boolean}}`；200 conversation | 无 upsert，保留 updatedAt；归档写 archivedAt，取消清空。内部有并发重试，但耗尽可返回相反状态，工具核对 ID/目标值；不停止生成、不删除消息/文件/分享 | `conversations_set_archived`；mock boolean/state verification |
 | POST `/api/convos/pin` | `{arg:{conversationId,pinned:boolean}}`；200 conversation | 无 upsert，保留 updatedAt，无客户端 CAS；核对返回状态 | `conversations_set_pinned`；mock |
 | DELETE `/api/convos` | **仅** `{arg:{conversationId}}`；201 `{acknowledged,deletedCount,messages,conversationIds}` | 必填非空字符串 ID，绝不透传 source/endpoint/thread_id 或批量参数；零删除可成功。级联 owner 子会话、消息、checkpoint、分享等，协调生成/子任务停止；部分失败仍可能已写入。不承诺任意旧 provider 执行均已停止或附件 blob 擦除；上游清理失败标志不能当完整成功 | `conversations_delete`；mock exact body/no bulk/zero count |
+
+新增 API 的完整 schema、字节预算、错误和调用示例见 [BOUNDED-MESSAGE-READS.md](BOUNDED-MESSAGE-READS.md)。这些是 v0.4.0 配套源码合同，不代表旧审计基线已经提供；发布/部署状态须单独核验。
 
 搜索依赖 `MEILI_HOST` / `MEILI_MASTER_KEY` 和可用索引；同步由 `SEARCH` 控制，索引最终一致。`SEARCH=false` 时既有索引查询仍可能返回旧数据；`/api/search/enable=true` 不保证索引可查或完整。实际没有 `GET /api/search?q=...` 路由，不能沿用数据提供层的旧 URL helper。Conversation list 的 search 合并 title/index 与 message 命中，每个索引最多 1000；消息索引查询失败时可能静默退化为标题等 conversation-index 匹配。消息搜索支持索引中的 text、thinking、steer 文本，不保证任意 tool 内容或附件字节可检索；查询语义由部署的 Meili 决定，无本地 SQL/Lucene/regex 解析。
 

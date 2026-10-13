@@ -1,5 +1,14 @@
 # Delivery status
 
+## v0.4.0 release candidate/source implementation — bounded message reading
+
+- Three dedicated tools: `messages_list`, `messages_content`, `messages_read`; **57 source tools total**. Paired `/api/message-reads` v2 routes are required; browser APIs remain intact. No dedicated full-reader aliases.
+- Mongo projections return metadata, bounded descriptor windows or one selected field. Strings are substring-projected before driver materialization. Structured fields retain per-selected-value serialization cost. Writer-maintained revisions fence supported updates; unversioned raw DB writes are explicitly outside the guarantee.
+- Final narrow review: **117 affected cases passed** (74 bounded API/actual-router, 41 MCP, 2 compiled-source HTTP/schema cases). Prior 206 message/privacy-method and background passing evidence is reused; overlapping historical runs are not summed. List pages now carry conversation identity and explicit unavailable-count observability once, and catalog descriptions explain initial selectors and UTC precision.
+- Synthetic reader discovery: **10 tools / 10,313 UTF-8 bytes → 3 tools / 3,876 bytes**, using actual SDK `tools/list` output with final descriptions. Giant fixture: legacy HTTP 3,970,485 bytes; maximum bounded upstream HTTP 22,279, MCP HTTP 32,721, descriptor DB result 457, string-window DB result 20,972 bytes across 248 bounded requests. These are fixture byte measurements, not token/latency savings.
+- [Current contract](BOUNDED-MESSAGE-READS.md) and [usage/gateway evidence](MESSAGE-READ-REFERENCES.md). Supplied evidence identifies gateway v1.5.0 / revision `fe6732474a96a0363dfb9822859af4e9bab360fa`; incident threshold/payload remain unmeasured.
+- Publication and deployment status must be verified separately from this source record. No production real-message retest was performed during implementation. Earlier Lighthouse `NO_FCP` is retained, not rerun, and establishes no performance acceptance. The paired LibreChat `docs/mcp-message-reads-patch.md` contains the self-contained maintenance/test runbook; task reports remain historical evidence.
+
 ## v0.3.1
 
 - Response-only Agent history trimming in get/create/update/set-skills; explicit agents_versions and generic requests remain unchanged. No additional upstream requests, input schema changes or storage mutations.
@@ -15,7 +24,7 @@
 - Audited pinned routes and model behavior: title-upsert creation needs no model call; message paging can skip ties; full reads preserve branches; project deletion unlinks rather than deleting chats. APIs are authenticated-user scoped, not cross-user administrator access.
 - Local type-check, all 31 mock/protocol tests and build pass. Actual deployment UA acceptance, SSE, search backend and new resource lifecycle remain unverified.
 
-## Implemented
+## Historical v0.3.1 baseline — implemented
 
 - Independent TypeScript HTTP API client, JSON config, npm CLI/library exports.
 - 56 MCP tools covering Skills/files/user activation, Agents/Skill bindings/history, Schedules/cron/run-now, Prompt groups/versions/defaults, Conversations/messages/search, Chat Projects/assignment, sharing/public visibility and unrestricted generic requests.
@@ -25,7 +34,7 @@
 - Locked npm dependencies, non-root Docker, CI and GitHub Release / GHCR workflows; npm registry publication optional.
 - README, current scope and pinned API capability matrix.
 
-## Local validation
+## Historical baseline — local validation
 
 - `npm run check`, `npm run build`: passed.
 - `npm test`: 35 grouped tests passed, including 4 Agent response-projection groups, User-Agent forwarding, 3 SSE cases, 5 Conversation/Message groups, Chat Project mapping and 8 refresh/persistence/concurrency/shutdown cases. Covers config, generic forwarding, credentials/redirects, 401/403/404/409/429/500, interrupted/timeout writes, cancellation between dependent requests, key CRUD/merge/version/permission semantics, pagination, MCP HTTP + stdio initialize/discover/call and protocol errors. Mocks do not prove live ACLs, database cascades or Meili indexing.

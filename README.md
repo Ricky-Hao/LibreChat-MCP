@@ -2,13 +2,15 @@
 
 给内网管理员 / Agent 使用的小型 LibreChat 管理 MCP Server。TypeScript + 官方 MCP SDK，无数据库、管理界面、登录流程或策略引擎。
 
-- **56 个工具**：Skills（含附件和激活状态）、Agents（含 Skill 绑定）、Scheduled Tasks / Cron、Prompt 库、Conversation 增删查改 / 归档 / 消息搜索、Chat Project 增删查改，以及共享 / 可见性管理。
+- **v0.4.0 源码共 57 个工具**：Skills（含附件和激活状态）、Agents（含 Skill 绑定）、Scheduled Tasks / Cron、Prompt 库、Conversation 增删查改 / 归档 / 消息搜索、Chat Project 增删查改，以及共享 / 可见性管理。消息分析使用三个有界工具，需要配套 LibreChat v2 读取 API；发布候选/源码实现的实际发布状态须单独核验。
 - **通用 API 请求**：没有接口白名单、只读模式或删除 / Run now 开关，方便请求上游新接口。
 - **Streamable HTTP + stdio**；JSON 配置；npm 包和 Docker 分发。
 
 > **仅用于可信内网。HTTP 默认没有鉴权，所有写操作均可调用。任何能连接它的人都能使用 refreshToken 对应用户的权限。它不是多用户权限隔离服务，也不是聊天代理。不要直接暴露到公网。**
 
 ## 快速运行
+
+大消息请使用 [三工具有界消息读取](docs/BOUNDED-MESSAGE-READS.md)。边界在 LibreChat HTTP 响应发送前生效；旧上游不支持时明确失败，不回退到完整消息。v0.4.0 移除 `conversations_messages_list/read`，改用 `messages_list/content/read`（工具名均带 `librechat_` 前缀）；其他资源工具不变。文档包含 schema、分页/版本语义、usage 含义及调用示例。
 
 需要 Node.js 22+。从源码：
 
@@ -36,10 +38,10 @@ MCP 地址：`http://<host>:3000/mcp`。健康检查：`GET /healthz`，只返�
 
 ### npm 包
 
-GitHub Release 提供可直接安装的 `.tgz` npm 包，不依赖 npm registry 登录：
+以下安装示例以 v0.4.0 为目标；请先分别核验 GitHub Release 资产和 GHCR 版本镜像已发布，示例不代表发布/部署已完成。GitHub Release 的 `.tgz` 可直接安装，不依赖 npm registry 登录：
 
 ```sh
-curl -fL -o librechat-mcp.tgz https://github.com/Ricky-Hao/LibreChat-MCP/releases/download/v0.3.1/ricky-hao-librechat-mcp-0.3.1.tgz
+curl -fL -o librechat-mcp.tgz https://github.com/Ricky-Hao/LibreChat-MCP/releases/download/v0.4.0/ricky-hao-librechat-mcp-0.4.0.tgz
 npm install -g ./librechat-mcp.tgz
 librechat-mcp --config ./config.json
 ```
@@ -57,7 +59,7 @@ chmod 600 config/config.json
 docker run --rm --name librechat-mcp \
   -p 127.0.0.1:3000:3000 \
   -v "$PWD/config:/config" \
-  ghcr.io/ricky-hao/librechat-mcp:0.3.1
+  ghcr.io/ricky-hao/librechat-mcp:0.4.0
 ```
 
 容器以非 root 的 `node` 用户（UID 1000）运行，配置目录与文件需归该 UID 所有且可写（必要时调整 ownership）。必须挂载**整个可写目录**，不能使用旧版的单文件或 `:ro` 挂载：刷新会以临时文件 + rename 原子保存轮换后的 refreshToken。容器内配置 `host: "0.0.0.0"`，健康检查固定使用端口 3000。
@@ -151,7 +153,7 @@ server.listen(config.port, config.host);
 | Prompt 分组 | `prompt_groups_list`, `prompt_groups_get`, `prompt_groups_create`, `prompt_groups_update`, `prompt_groups_delete` |
 | Prompt 版本 | `prompts_list`, `prompts_get`, `prompts_add_version`, `prompts_set_default`, `prompts_delete` |
 | Conversations | `conversations_list`, `conversations_get`, `conversations_create`, `conversations_update`, `conversations_delete`, `conversations_set_archived`, `conversations_set_pinned` |
-| 消息 / 检索 | `conversations_messages_list`, `conversations_messages_read`, `messages_search` |
+| 消息 / 检索 | `messages_list`, `messages_content`, `messages_read`, `messages_search` |
 | Chat Projects | `projects_list`, `projects_get`, `projects_create`, `projects_update`, `projects_delete` |
 | 会话项目归属 | `conversations_set_project` |
 | 共享 / 可见性 | `permissions_roles`, `permissions_get`, `permissions_update`, `visibility_set` |
@@ -171,7 +173,7 @@ server.listen(config.port, config.host);
 - **Cron**：支持上游 structured cadence 和 `{"frequency":"cron","expression":"0 9 * * 1-5"}`。提供 IANA 时区。创建要求 `clientRequestId`，用同一 key 标识同一创建意图；默认创建为停用，显式 `enabled: true` 可直接启用。更新 / 启停传 `expectedConfigRevision`。不会隐式调用 Run now，但已启用任务会按时间执行。修改可能重算 `nextRunAt`、执行 MCP preflight 并影响在途任务；删除可能返回 202 draining。
 - **Prompt 库**：一个 group 下的每个 Prompt 文档是一版，不存在供客户端使用的数字版本 CAS。修改正文用 `prompts_add_version` 追加；`prompts_set_default` 另行改变 `productionId`。删除最后一版会删除 group；删除默认版会选择最新剩余版。
 - **Conversation**：操作当前凭据用户自己的会话，没有管理员跨用户 bypass。创建使用本次审计版本的标题 upsert 接口 + 新 UUID，仅创建 metadata，不调用模型。修改只改标题，先读存在性，但没有原子 update-only/CAS；归档、置顶和项目归属分别操作。列表默认只列未归档，`isArchived: true` 只列归档。
-- **会话内容**：`conversations_get` 只读 metadata；`conversations_messages_list` 分页读取正文，保留结构化 content 和 parentMessageId。上游时间游标可能漏掉同时间戳消息；需要完整内容时用 `conversations_messages_read`，返回全部存储分支的数组、大小无界，可用 messageId 只读一条。
+- **会话内容**：`messages_list` 读取 metadata/原始 usage，`messages_content` 发现条目和工具状态，`messages_read` 分段读取正文；续页只传 `cursor`，嵌套内容显式选择。详情见 [有界读取契约](docs/BOUNDED-MESSAGE-READS.md)。`messages_search` 和通用 API 不是有界分析路径。
 - **消息搜索**：`messages_search` 的 query 交给 Meilisearch，limit 最多 1000；含归档会话，没有可靠搜索分页、不能组合 conversationId。不保证索引实时或所有 tool/附件内容可搜。Conversation 列表的 search 也搜索标题及消息，但候选集有上游上限。通用 GET `/api/search/enable` 可检查 SEARCH/Meili 健康；未部署/不可用时搜索会报上游错误，不伪装为空结果。
 - **Chat Project**：支持 name/description，不是旧 Agent sharing project，也没有 instructions、共享或归档 API。列表搜索 name/description，不依赖 Meili；用 Conversation 列表的 projectId 查看项目内会话。`conversations_set_project` 必须明确传 projectId，null 解除归属；一个会话只能属于一个项目。
 - **删除区别**：删除 Conversation 会级联子会话、消息等，并协调停止相关生成，但不保证擦除上传文件。删除 Project 只解除会话归属，保留会话/消息/文件；相关 Schedule 可能在后续执行检查中停用。两者都可能部分成功，不作事务或即时完全清理承诺，不自动清空其他会话。
