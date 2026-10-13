@@ -33,7 +33,7 @@ test('Skills CRUD, cursor paging, expectedVersion conflict, readonly source and 
   const list = output(await h.call('skills_list', { limit: 2, cursor: 'old', search: 'test' }));
   assert.equal(list.data.after, 'next-cursor');
   assert.match(h.last().path, /cursor=old/);
-  await h.call('skills_create', { name: 'test', description: 'a description', body: 'hello' });
+  await h.call('skills_create', { config: { name: 'test', description: 'a description', body: 'hello' } });
   assert.equal(h.last().method, 'POST');
   assert.equal(h.last().path, '/api/skills');
   await h.call('skills_update', { id: skillId, expectedVersion: 7, changes: { body: 'new' } });
@@ -62,17 +62,17 @@ test('Skills CRUD, cursor paging, expectedVersion conflict, readonly source and 
   assert.equal(h.last().method, 'DELETE');
 });
 
-test('Agent changes do not replay unrelated fields, parameters merge, Skill binding remains separate', async (t) => {
+test('Agent changes do not replay unrelated fields, parameters replace, Skill binding remains available', async (t) => {
   const h = await setup(t, () => ({ id: 'agent_test', model_parameters: { temperature: 0.5, top_p: 0.9 }, tools: ['keep'], instructions: 'keep' }));
   await h.call('agents_list', { promoted: true });
   assert.equal(h.last().path, '/api/agents?promoted=1');
-  await h.call('agents_create', { provider: 'openAI', model: 'model-test', name: 'test' });
+  await h.call('agents_create', { config: { provider: 'openAI', model: 'model-test', name: 'test' } });
   assert.equal(h.last().path, '/api/agents');
   assert.equal(h.last().method, 'POST');
   await h.call('agents_update', { id: 'agent_test', changes: { name: 'new name' } });
   assert.deepEqual(h.last().body, { name: 'new name' });
   await h.call('agents_update', { id: 'agent_test', changes: { model_parameters: { temperature: 0.8 } } });
-  assert.deepEqual(h.last().body, { model_parameters: { temperature: 0.8, top_p: 0.9 } });
+  assert.deepEqual(h.last().body, { model_parameters: { temperature: 0.8 } });
   await h.call('agents_set_skills', { id: 'agent_test', skills: [skillId], scope: 'selected' });
   assert.deepEqual(h.last().body, { skills: [skillId], skills_scope: 'selected' });
   for (const [name, suffix, method] of [['agents_get', '/expanded', 'GET'], ['agents_versions', '/versions', 'GET'], ['agents_delete', '', 'DELETE']]) {
@@ -88,8 +88,8 @@ test('Schedule cadence and concurrency map literally; run-now is explicit and de
     return { id: 'sched_test', configRevision: 2, nextRunAt: '2030-01-01T00:00:00.000Z' };
   });
   await h.call('schedules_create', {
-    name: 'test', prompt: 'hello', agent_id: 'agent_test', timezone: 'Asia/Shanghai',
-    cadence: { frequency: 'cron', expression: '0 9 * * 1-5' }, clientRequestId: 'create-test-1',
+    config: { name: 'test', prompt: 'hello', agent_id: 'agent_test', timezone: 'Asia/Shanghai',
+      cadence: { frequency: 'cron', expression: '0 9 * * 1-5' } }, clientRequestId: 'create-test-1',
   });
   assert.equal(h.last().path, '/api/schedules');
   assert.equal(h.last().body.enabled, false);
@@ -151,9 +151,9 @@ test('Chat Project CRUD and explicit conversation assignment use real routes wit
   assert.equal(list.data.nextCursor, 'next cursor');
   assert.equal(new URL(h.last().path, 'http://test').searchParams.get('search'), 'C++');
   assert.equal(new URL(h.last().path, 'http://test').searchParams.get('cursor'), 'old cursor');
-  assert.equal(output(await h.call('projects_create', { name: ' Project ', description: 'Description' })).status, 201);
+  assert.equal(output(await h.call('projects_create', { config: { name: ' Project ', description: 'Description' } })).status, 201);
   assert.equal(h.last().path, '/api/projects');
-  assert.deepEqual(h.last().body, { name: 'Project', description: 'Description' });
+  assert.deepEqual(h.last().body, { name: ' Project ', description: 'Description' });
   await h.call('projects_get', { projectId });
   assert.equal(h.last().path, `/api/projects/${projectId}`);
   assert.equal(h.last().method, 'GET');

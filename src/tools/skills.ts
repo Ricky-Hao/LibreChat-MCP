@@ -1,13 +1,7 @@
 import { z } from 'zod';
 import { ApiError } from '../client.js';
-import { id, objectId, text, page, segment, nonempty, type Tools } from './common.js';
-
-const fields = {
-  name: text.min(1), description: text.min(1), body: text.optional(),
-  displayTitle: text.optional(), category: text.optional(), alwaysApply: z.boolean().optional(),
-  frontmatter: z.record(z.string(), z.unknown()).optional(),
-};
-const changes = nonempty(z.strictObject(fields).partial().shape);
+import { id, objectId, text, page, segment, type Tools } from './common.js';
+import { jsonConfigSchema } from './json-config.js';
 const filePath = text.min(1).refine((s) => !s.startsWith('/') && s.split('/').every((p) => p && p !== '.' && p !== '..'), 'Use a relative file path');
 const fileUrl = (skillId: string, path: string) => `/api/skills/${segment(skillId)}/files/${path.split('/').map(segment).join('/')}`;
 
@@ -17,10 +11,11 @@ export const skillsTools: Tools = (tool, api) => {
   }, (query) => api.request({ path: '/api/skills', query }), false);
   tool('skills_get', 'Read a Skill including body, source and version.', { id },
     ({ id }) => api.request({ path: `/api/skills/${segment(id)}` }), true);
-  tool('skills_create', 'Create a private inline Skill. Sharing and user activation are separate operations.', fields,
-    (body) => api.request({ method: 'POST', path: '/api/skills', body }));
+  tool('skills_create', 'Create a private inline Skill from config JSON. Upstream validates fields; sharing and activation are separate.', {
+    config: jsonConfigSchema().describe('Upstream Skill config, e.g. name/description/body/frontmatter.'),
+  }, ({ config }) => api.request({ method: 'POST', path: '/api/skills', body: config }));
   tool('skills_update', 'Patch a Skill using the version from skills_get. A 409 returns current state; never overwrites a conflict.', {
-    id, expectedVersion: z.number().int().positive(), changes,
+    id, expectedVersion: z.number().int().positive(), changes: jsonConfigSchema(true, ['expectedVersion']).describe('Upstream Skill changes; expectedVersion belongs only in outer arguments. Unknown fields may be ignored upstream.'),
   }, ({ id, expectedVersion, changes }) => api.request({ method: 'PATCH', path: `/api/skills/${segment(id)}`, body: { ...changes, expectedVersion } }));
   tool('skills_delete', 'Delete a Skill, its files and ACL; upstream prunes Agent bindings. Deployment Skills are read-only upstream. No delete CAS.', { id },
     ({ id }) => api.request({ method: 'DELETE', path: `/api/skills/${segment(id)}` }));

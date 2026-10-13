@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.5.0 — transparent resource configuration
+
+Release-candidate source prepared locally; publication and deployment are pending separate verification.
+
+- Breaking input change: `agents_create({config:{...}})` replaces flat editable fields. `agents_update({id,changes:{...}})` accepts any bounded JSON object, with nonempty changes; business validation stays upstream.
+- Breaking parameter behavior: remove the hidden expanded GET and model_parameters shallow merge. Send complete intended maps/arrays for upstream replacement. No UUID generation, options cleanup, tool attachment, implicit readback or CAS.
+- Preserve supplied tool_options/approval revisions, linked instructions, subagents, skills and future fields; upstream may strip unknown fields or reconcile permissions. Existing history trimming, redaction and `agents_set_skills` remain.
+- Generic limits: depth 32, 10,000 values, 1 MiB serialized UTF-8; reject non-JSON data/accessors/cycles and `__proto__` before record parsing. [Migration and examples](AGENT-CONFIGURATION.md).
+- Skill/Project/Schedule create now use config wrappers. Their configuration updates and Prompt revision payloads are open bounded JSON; Skill expectedVersion and Schedule clientRequestId/expectedConfigRevision remain mandatory outer controls. Schedule create explicitly defaults enabled=false; true must be supplied outside config. Embedded control conflicts fail before HTTP.
+- Project instructions/contextRevision pass through; contextRevision does not provide general metadata CAS. Prompt group creation metadata remains typed because upstream spreads it into database queries; group update stays subject to the upstream strict validator.
+- Remove unsupported conversations_create: current rename route requires existing metadata and noUpsert. conversations_update now sends one POST without the obsolete pre-read, preserving response checks. No automatic chat/import/fork fallback or stored binding changes.
+- Candidate package/server version **0.5.0**, catalog **56**. No publication/deployment or live resource changes are claimed by this local preparation. [Unified contract and migration](CONFIGURATION.md).
+
 ## v0.4.0 — bounded stored-message reads
 
 [Package/image publication is verified](STATUS.md#published-v040); production deployment and real-message retesting remain unperformed.

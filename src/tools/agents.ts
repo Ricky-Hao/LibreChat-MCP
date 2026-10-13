@@ -1,16 +1,7 @@
 import { z } from 'zod';
 import type { ApiResponse } from '../client.js';
-import { id, objectId, text, page, jsonObject, segment, nonempty, type Tools } from './common.js';
-
-const fields = {
-  name: text.optional(), description: text.optional(), instructions: text.optional(),
-  provider: text.min(1).optional(), model: text.min(1).optional(),
-  model_parameters: jsonObject.optional(), tools: z.array(text).optional(),
-  category: text.optional(), conversation_starters: z.array(text).optional(),
-  recursion_limit: z.number().int().positive().optional(),
-  end_after_tools: z.boolean().optional(), hide_sequential_outputs: z.boolean().optional(),
-  artifacts: text.optional(), memory_scope: z.enum(['user', 'agent']).optional(),
-};
+import { id, objectId, text, page, segment, type Tools } from './common.js';
+import { jsonConfigSchema } from './json-config.js';
 
 /** Only the current Agent at response.data; leave nested config and diagnostics intact. */
 function currentAgent(response: ApiResponse): ApiResponse {
@@ -34,18 +25,12 @@ export const agentsTools: Tools = (tool, api) => {
   tool('agents_get', 'Read Agent details. expanded=true returns editable configuration and requires EDIT permission.' + currentResponse, {
     id, expanded: z.boolean().default(true),
   }, ({ id, expanded }) => api.request({ path: `/api/agents/${segment(id)}${expanded ? '/expanded' : ''}` }).then(currentAgent), true);
-  tool('agents_create', 'Create an Agent with explicit provider/model. Skill binding and public sharing are separate tools.' + currentResponse, {
-    ...fields, provider: text.min(1), model: text.min(1),
-  }, (body) => api.request({ method: 'POST', path: '/api/agents', body }).then(currentAgent));
-  tool('agents_update', 'Patch only supplied Agent fields; model_parameters merges with existing parameters. Arrays replace explicitly. No upstream general CAS; concurrent edits may race. Upstream may reconcile tool permissions.' + currentResponse, {
-    id, changes: nonempty(fields),
-  }, async ({ id, changes }) => {
-    if (changes.model_parameters) {
-      const { data } = await api.request<{ model_parameters?: Record<string, unknown> }>({ path: `/api/agents/${segment(id)}/expanded` });
-      changes.model_parameters = { ...data.model_parameters, ...changes.model_parameters };
-    }
-    return api.request({ method: 'PATCH', path: `/api/agents/${segment(id)}`, body: changes }).then(currentAgent);
-  });
+  tool('agents_create', 'Create from config JSON; upstream validates required fields and permissions and may adjust or ignore fields.' + currentResponse, {
+    config: jsonConfigSchema().describe('Upstream Agent config, e.g. provider/model/model_parameters. JSON only; max depth 32, 10000 values, 1 MiB.'),
+  }, ({ config }) => api.request({ method: 'POST', path: '/api/agents', body: config }).then(currentAgent));
+  tool('agents_update', 'Send changes unchanged: maps/arrays replace, including model_parameters. No merge, pre-read or CAS. Upstream may adjust or ignore fields; verify with agents_get.' + currentResponse, {
+    id, changes: jsonConfigSchema(true).describe('Nonempty upstream Agent patch. Preserve complete intended maps and approval revisions. JSON only; max depth 32, 10000 values, 1 MiB.'),
+  }, ({ id, changes }) => api.request({ method: 'PATCH', path: `/api/agents/${segment(id)}`, body: changes }).then(currentAgent));
   tool('agents_set_skills', 'Set Agent Skill catalog configuration. skills replaces the binding list; enabled and scope change only when supplied. scope=selected with [] exposes none, unlike legacy [] which can expose all. No CAS.' + currentResponse, {
     id, skills: z.array(objectId), enabled: z.boolean().optional(), scope: z.enum(['all', 'selected', 'none']).optional(),
     authoringEnabled: z.boolean().optional(),

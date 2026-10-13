@@ -1,5 +1,13 @@
 # Delivery status
 
+## v0.5.0 release-candidate source — transparent resource configuration
+
+- Agent create uses `{config}` and update uses `{id,changes}` with strict outer arguments and open bounded JSON objects. No editable business-field whitelist; upstream validation/authorization remains authoritative.
+- Removes the hidden model_parameters GET/shallow merge. No automatic approval revision generation, tools/options cleanup or readback; existing current-Agent history trimming and redaction remain.
+- Skill/Project/Schedule configuration and Prompt revision payloads use the same bounded JSON validator. Mandatory Skill/Schedule outer controls remain; Prompt group creation keeps its strict metadata boundary until upstream validates it before query construction.
+- Current catalog **56**: unsupported conversations_create removed, existing-only rename no longer pre-reads. No chat execution fallback or stored platform binding edits. Project instructions/contextRevision supported; no general Project metadata CAS claim.
+- [Unified migration and JSON limits](CONFIGURATION.md), [Agent-specific semantics](AGENT-CONFIGURATION.md). Package/server version is now **0.5.0** for local release preparation, separate from released/deployed v0.4.0. Git publication, release assets/images and deployment remain for the coordinator to perform and verify. No production API or real resource/platform binding mutations occurred in this preparation. Historical sections below describe their original release snapshots.
+
 ## v0.4.0 source implementation — bounded message reading
 
 - Three dedicated tools: `messages_list`, `messages_content`, `messages_read`; **57 source tools total**. Paired `/api/message-reads` v2 routes are required; browser APIs remain intact. No dedicated full-reader aliases.
@@ -48,7 +56,7 @@
 
 - No Schedule sharing API exists in the audited resource ACL model.
 - No generic Agent/Prompt enable/disable API or Prompt in-place content update; Prompt content changes append a version.
-- No cross-user Conversation/Project admin bypass, chat generation/send, message-body editing, bulk conversation clear, Project archive/sharing or synthetic search pagination. Empty Conversation creation intentionally uses the pinned title-upsert, not an invented create-only endpoint.
+- No cross-user Conversation/Project admin bypass, chat generation/send, message-body editing, bulk conversation clear, Project archive/sharing or synthetic search pagination. Current upstream rename is existing-only; the formerly advertised empty Conversation creation has been removed in v0.5.0 candidate source.
 - No standalone tools for every advanced Agent field, duplicate/revert/avatar, Skill archive import, or arbitrary binary downloads. Use the generic request where its JSON/text contract fits; attachment uploads support utf8/base64.
 - No M2M/OpenID management-auth setup or refresh, JWT signing/decoding identity claims, login/password storage, Secret-file loader or manual-config hot reload.
 - No cross-process refresh coordination; use one process/replica per refresh session. Library factories without an explicit persistence callback are in-memory only; CLI always provides it.

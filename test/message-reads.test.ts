@@ -20,7 +20,7 @@ test('exactly three concise reader tools, strict starts/cursor-only calls and co
   await client.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp`)));
   const call = (name: string, args: Record<string, unknown>) => client.callTool({ name: `librechat_${name}`, arguments: args });
   const tools = (await client.listTools()).tools;
-  assert.equal(tools.length, 57);
+  assert.equal(tools.length, 56);
   const readers = tools.filter((tool) => /messages_/.test(tool.name) && tool.name !== 'librechat_messages_search');
   assert.deepEqual(readers.map((tool) => tool.name).sort(), ['librechat_messages_content', 'librechat_messages_list', 'librechat_messages_read']);
   for (const tool of readers) { assert.equal(tool.annotations?.readOnlyHint, true); assert.ok(tool.description!.length < 160); assert.equal(tool.inputSchema.additionalProperties, false); }

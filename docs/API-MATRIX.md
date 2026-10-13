@@ -1,8 +1,8 @@
 # LibreChat API 能力矩阵
 
-源码基准：[官方 dev@21a9edbe7481fd4de180b45922a2468fdcf79ea3](https://github.com/danny-avila/LibreChat/tree/21a9edbe7481fd4de180b45922a2468fdcf79ea3)。审计的是该 commit 的路由、中间件、校验器、服务和模型，不是邻近的自定义分支，也不只是上游文档。
+历史基础审计：[官方 dev@21a9edbe7481fd4de180b45922a2468fdcf79ea3](https://github.com/danny-avila/LibreChat/tree/21a9edbe7481fd4de180b45922a2468fdcf79ea3)。本轮 v0.5.0 候选发布源码的 Agent/Skill/Schedule/Prompt/Project 配置及 Conversation rename 合同按相邻只读 LibreChat `8ba662e1110bd1154bd415a6647bec5eca9cfc79` 的路由、校验器、服务和模型复核，覆盖旧版相应合同。
 
-**没有运行真实 LibreChat / Gateway 集成测试。** 下表的“已实现 / mock”不等于真实环境认证或权限验证通过。每个资源受目标部署的功能开关、用户角色、ACL、租户上下文和内容过滤影响；MCP 不代签 JWT、不指定 tenant/user 冒充身份，不绕过上游权限。
+**没有生产 LibreChat / Gateway 集成验证。** 本轮本地用实际 Project/Prompt handler、service、数据库方法和临时 Mongo 验证了相关写入合同；rename 使用实际 handler 与合成存储依赖，Schedule 使用实际 schema。认证、授权、调度运行及平台绑定不属于这些合成验证。每个资源受目标部署的功能开关、角色、ACL、租户和内容过滤影响；MCP 不代签 JWT、不指定 tenant/user 冒充身份，不绕过权限。
 
 所有工具名称前缀为 `librechat_`；以下省略前缀。
 
@@ -20,12 +20,14 @@
 
 ## Skills
 
+当前源码配置 wrapper/JSON 边界与保留 typed 的操作见 [配置写入合同](CONFIGURATION.md)；以下开放字段仍由上游验证，不代表任意字段都会存储。
+
 | HTTP method/path | 字段与返回 | 认证/权限、并发与副作用 | MCP / 测试 |
 |---|---|---|---|
 | GET `/api/skills` | query `category,search,limit,cursor`；返回 `{skills,has_more,after}`，每项带 version/source | 用户 JWT + SKILLS USE；按可访问/公开 ACL 和租户列出。GET 可能启动 GitHub 同步 | `skills_list`；mock cursor/response |
 | GET `/api/skills/:id` | 返回 Skill，包括 `_id,name,description,body,frontmatter,version,source,sourceMetadata,isPublic` | VIEW ACL；deployment Skill 可读 | `skills_get`；HTTP MCP 调用 |
-| POST `/api/skills` | `name,description` 必填；`displayTitle,body,frontmatter,category,alwaysApply` 可选；201 Skill + warnings | USE/CREATE；作者与 tenant 来自已认证用户；创建 owner ACL，不公开共享 | `skills_create`；mock mapping |
-| PATCH `/api/skills/:id` | 上述字段的局部更改，正整数 `expectedVersion` 必填；200 新 Skill；409 `{error:skill_version_conflict,current}` | CREATE + EDIT；模型按 `_id,version` 条件原子更新并递增版本。deployment 来源由上游拒绝；用户 API 不统一禁止 github/notion 来源写入，但后续同步可能覆盖手改。不自动覆盖版本冲突 | `skills_update`；mock 版本冲突/上游来源拒绝 |
+| POST `/api/skills` | MCP `{config}` 原样作 body；上游要求 name/description，支持 displayTitle/body/frontmatter/category/alwaysApply；201 Skill + warnings | USE/CREATE；作者与 tenant 来自已认证用户；handler 忽略未知字段；创建 owner ACL，不公开共享 | `skills_create`；open config |
+| PATCH `/api/skills/:id` | MCP `{id,expectedVersion,changes}`；非空开放 changes，顶层不得内嵌 expectedVersion；HTTP body 加外层正整数版本；200 新 Skill；409 `{error:skill_version_conflict,current}` | CREATE + EDIT；模型按 `_id,version` 条件原子更新并递增版本。deployment 来源由上游拒绝；用户 API 不统一禁止 github/notion 来源写入，但后续同步可能覆盖手改。不自动覆盖版本冲突 | `skills_update`；版本冲突/控制键冲突/上游来源拒绝 |
 | DELETE `/api/skills/:id` | `{id,deleted:true}` | CREATE + DELETE；无删除 CAS。删除文件记录/ACL、清理 Agent allowlists；blob 清理异步，成功不代表所有 blob 已擦除 | `skills_delete`；mock mapping |
 | GET `/api/skills/:id/files` | `{files:[...]}`，无分页 | VIEW；元数据可能含存储路径，日志不记录 | `skills_files_list`；mock |
 | GET `/api/skills/:id/files/*relativePath` | JSON `{content?,mimeType,isBinary,relativePath,filename,bytes}`；`SKILL.md` 直接读正文 | VIEW；文本可写上游缓存；二进制或超过约 1 MiB 的文件可能不返回 content，不当作空文件 | `skills_file_read`；mock nested path |
@@ -44,13 +46,13 @@
 | GET `/api/agents` | `category,search,limit,cursor,promoted,requiredPermission`；工具将 promoted boolean 映射为上游要求的 1/0；游标结果保留上游 `data,has_more,after` | 用户 JWT、AGENTS USE、按 ACL 查询；上游可能刷新元数据，非严格纯读 | `agents_list`；schema/discovery |
 | GET `/api/agents/:id` | 基本 Agent；有数据库 `_id` 及业务 `id=agent_...` | VIEW；不返回完整 instructions 等编辑配置 | `agents_get(expanded=false)` |
 | GET `/api/agents/:id/expanded` | 完整可编辑配置，version 是历史计数 | EDIT，不将 version 假冒为 CAS | `agents_get` 默认 expanded；mock |
-| POST `/api/agents` | `provider,model`，常用可选字段 name/description/instructions/model_parameters/tools/category 等；201 Agent | CREATE；上游设置作者、ID、过滤/授权工具并授予 owner ACL。不隐式公开 | `agents_create`；mock |
-| PATCH `/api/agents/:id` | 只发指定字段；200 Agent | CREATE + EDIT；没有一般客户端 CAS。server 会做 legacy OCR / 工具权限 reconciliation，可能改变无权限的已有工具。MCP 不重发整个 Agent；model_parameters 浅合并，其他数组明确替换 | `agents_update`；mock 不覆盖无关字段 |
+| POST `/api/agents` | MCP 接收 `{config:JSON对象}`，只以 config 作 body；上游决定 provider/model 等必需字段；201 Agent | CREATE；上游设置作者、ID、过滤/授权工具并授予 owner ACL。不隐式公开 | `agents_create`；开放配置，合成 SDK/HTTP 验证 |
+| PATCH `/api/agents/:id` | MCP 接收 `{id,changes:非空JSON对象}`，只以 changes 作 body；200 Agent | CREATE + EDIT；没有一般客户端 CAS。server 会做 legacy OCR / 工具权限 reconciliation。map/数组含 model_parameters 按上游替换，不再隐藏 GET/浅合并；省略字段不代表上游不调整关联配置 | `agents_update`；单次合成写入、无隐式 readback |
 | PATCH `/api/agents/:id`（Skill 配置） | `skills,skills_enabled,skills_scope,skill_authoring_enabled` | `skills_scope=all/selected/none`。legacy 空 skills 配合 enabled=true 可表示全部；空列表要表达 none 应指定 scope。无 CAS | `agents_set_skills`；mock 独立 payload |
 | GET `/api/agents/:id/versions` | 历史配置数组 | EDIT；不是乐观锁 | `agents_versions`；mock |
 | DELETE `/api/agents/:id` | `{message:"Agent deleted"}` | DELETE；无 CAS。上游相关 ACL/引用处理和后续 schedule fire access 检查仍生效；不要把此操作理解成撤回既有聊天 | `agents_delete`；mock |
 
-专用编辑 schema 覆盖常用 Agent 字段。复杂 graph/subagents/tool_resources、duplicate/revert/avatar 等无需占位工具，使用通用请求；目前没有多版本转换层。
+以上 Agent config/changes 纳入 **v0.5.0 候选发布源码**，没有 MCP 可编辑业务字段白名单；外层参数仍严格、JSON 有通用大小/类型边界。tool_options、instructionsPrompt、subagents 等可原样提交，由上游验证/调整；不代表每个字段都应用。详情及审计的上游 `8ba662e1110bd1154bd415a6647bec5eca9cfc79` 语义见 [Agent 配置透传](AGENT-CONFIGURATION.md)。其他路由操作仍用既有专用工具或独立通用请求，没有新增兼容别名或多版本转换层。
 
 ## Scheduled Tasks / Cron
 
@@ -58,8 +60,8 @@
 |---|---|---|---|
 | GET `/api/schedules` | `{schedules,limits}`；**无分页** | 用户 JWT + SCHEDULES USE，owner-scoped；读取会重试最多一小批 deferred deletions，并可能中止/擦除先前正在删除的任务；不 run-now | `schedules_list`；discovery |
 | GET `/api/schedules/:id` | Schedule，含 `configRevision,timezone,nextRunAt,lastRun,inFlight` | owner-scoped，跨 owner 通常 404 | `schedules_get`；discovery |
-| POST `/api/schedules` | `name,prompt,agent_id,cadence,timezone,clientRequestId`；可选 target=new,file_ids,chatProjectId,enabled；201 Schedule | CREATE；检查 agent USE/VIEW、附件/项目 ownership、账户删除门禁和服务就绪。clientRequestId 是真实上游幂等标识。上游 enabled 默认 true；专用工具默认 false，允许显式 true | `schedules_create`；mock cron/disabled 默认 |
-| PATCH `/api/schedules/:id` | 局部配置 + `expectedConfigRevision`；200 新 Schedule，409 冲突 | upstream 可选 revision，但专用工具要求。服务先比 revision，再以读取 revision 为原子写 fence；不伪造 CAS。cadence/timezone 变更重算 nextRunAt；编辑可改 claim fencing，并做 MCP preflight/文件保留 | `schedules_update`；mock revision payload |
+| POST `/api/schedules` | MCP `{config,clientRequestId,enabled?}`；开放 config 如 name/prompt/agent_id/cadence/timezone；body 加外层 controls；201 Schedule | CREATE；检查 agent USE/VIEW、附件/项目 ownership、账户删除门禁和服务就绪。clientRequestId 必填幂等标识；MCP 显式默认 enabled=false，允许外层显式 true，不继承上游默认 true | `schedules_create`；config 顶层拒绝 enabled/clientRequestId/expectedConfigRevision |
+| PATCH `/api/schedules/:id` | MCP `{id,expectedConfigRevision,changes}`；开放非空 changes + 外层 revision；200 新 Schedule，409 冲突 | upstream 可选 revision，但专用工具要求。changes 顶层拒绝 enabled/clientRequestId/expectedConfigRevision。服务先比 revision，再以读取 revision 为原子写 fence。cadence/timezone 变更重算 nextRunAt；编辑可改 claim fencing，并做 MCP preflight/文件保留 | `schedules_update`；literal payload/outer controls |
 | PATCH `/api/schedules/:id`（启停） | `{enabled,expectedConfigRevision}` | 独立操作；启用安排未来执行，停用不保证即时 abort 现有生成 | `schedules_set_enabled`；mock |
 | DELETE `/api/schedules/:id` | 200 或 202 `{id}`；503 可能 unconfirmed | quiesce-then-erase：停止新 claim、尝试 abort live runs；202 = draining，不伪报已完全擦除；无客户端 delete CAS | `schedules_delete`；mock 202 |
 | POST `/api/schedules/:id/run` | `{scheduleId,conversationId,status:"started"}`；409 已 leased；其他 fire 错误 | CREATE；立即触发真实 Agent，可能费用和工具调用；独立调用，不重试 | `schedules_run_now`；mock explicit call |
@@ -74,12 +76,12 @@ cadence：structured `hourly/daily/weekdays/weekly` + hour/minute/daysOfWeek，�
 |---|---|---|---|
 | GET `/api/prompts/groups` | `limit,cursor,name,category`；`{promptGroups,pageNumber,pageSize,pages,has_more,after}`；工具显式默认 limit=20 | 用户 JWT + PROMPTS USE，group ACL；上游兼容 pageSize，但专用工具使用 cursor | `prompt_groups_list`；mock |
 | GET `/api/prompts/groups/:groupId` | Group，包括 productionId / productionPrompt | group VIEW | `prompt_groups_get` |
-| POST `/api/prompts` | `{group:{name,oneliner?,category?,command?},prompt:{prompt,type:text|chat}}`；`{group,prompt}` | CREATE；新建 group + 初始 version，初始 productionId 指向该版。不共享。多步骤写非原子，不自动重试 | `prompt_groups_create`；mock |
-| PATCH `/api/prompts/groups/:groupId` | 严格 metadata schema `name,oneliner,category,command`；Group | CREATE + EDIT；排除 productionId/author 等，无 CAS | `prompt_groups_update`；mock |
+| POST `/api/prompts` | MCP `{group:严格metadata,prompt:开放JSON}`；上游 prompt 要求 prompt/type；返回 `{group,prompt}` | CREATE；group 仍限定 name/oneliner/category/command，因为上游直接用它构造数据库 query/setOnInsert。初始 productionId 指向第一版，不共享；多步骤写非原子 | `prompt_groups_create`；保留 group 边界，prompt 不重复字段白名单 |
+| PATCH `/api/prompts/groups/:groupId` | MCP `{groupId,changes:非空开放JSON}`；上游严格 metadata schema 只接受 name/oneliner/category/command | CREATE + EDIT；未知字段及 productionId/author 等上游拒绝，无 CAS | `prompt_groups_update`；未知字段到达上游校验器 |
 | DELETE `/api/prompts/groups/:groupId` | message | DELETE；所有版本及 group ACL 级联，无 CAS | `prompt_groups_delete`；mock |
 | GET `/api/prompts?groupId=...` | 所有版本，createdAt 降序，数组；无分页 | group VIEW；专用工具必填 groupId，不请求跨组 admin bypass 列表 | `prompts_list` |
 | GET `/api/prompts/:promptId` | Prompt `{_id,groupId,author,prompt,type,createdAt,updatedAt,...}` | 经 group VIEW | `prompts_get` |
-| POST `/api/prompts/groups/:groupId/prompts` | `{prompt:{prompt,type}}`；`{prompt}` | group EDIT；**追加新文档**；不覆盖历史，不切换 productionId | `prompts_add_version`；mock append/no implicit default |
+| POST `/api/prompts/groups/:groupId/prompts` | MCP `{groupId,prompt:开放JSON}`；上游要求 prompt/type，剥离未知字段；返回 `{prompt}` | group EDIT；**追加新文档**；不覆盖历史，不切换 productionId | `prompts_add_version`；mock append/no implicit default |
 | PATCH `/api/prompts/:promptId/tags/production` | `{message}`；工具回读 group 验证 productionId | CREATE + group EDIT；无 CAS，可能 concurrent change | `prompts_set_default`；mock readback |
 | DELETE `/api/prompts/:promptId?groupId=...` | 删除结果；可能额外返回 promptGroup 被删 | group DELETE；最后一版删除 group/ACL；若删除 production 则选最新剩余版本 | `prompts_delete`；mock query |
 
@@ -99,8 +101,7 @@ cadence：structured `hourly/daily/weekdays/weekly` + hour/minute/daysOfWeek，�
 | GET `/api/message-reads/read` | ref + field/index；续页仅 cursor | Mongo 字符串窗口；结构化值仅加载所选字段；版本与数据同次查询 | `messages_read` |
 | GET `/api/messages?search=...&pageSize=...` | 工具 query → search、limit → pageSize，默认 25 / 最大 1000；`{messages,nextCursor:null}` | Meili 全文搜索；含归档会话。无可用搜索分页、无 conversationId 联合过滤（传 ID 会绕过搜索）；不伪造 total/cursor。保留上游命中数据和中央凭据脱敏，不额外宣称与普通消息读取投影相同 | `messages_search`；mock mapping/errors |
 | GET `/api/search/enable` | JSON boolean | SEARCH 开关及 Meili 健康检查，不代表索引完整；不是搜索接口 | 通用 `api_request`，无自动 preflight/gate |
-| POST `/api/convos/update`（创建） | `{arg:{conversationId,title}}`；201 conversation | **没有专门空会话创建 API**。工具生成新 UUID，利用 pinned 标题接口 upsert 创建仅 metadata 的会话；无模型调用，无 create-only/CAS 保证，无跨调用幂等键；验证返回 ID/title | `conversations_create`；mock UUID/no chat call |
-| POST `/api/convos/update`（修改） | 同上，只支持 title；工具 trim 且限制 1024，不静默截断 | 先 GET 确认存在以防拼错 ID 触发 upsert，但不是原子 update-only；并发删除后仍可能重建。200/201 `{message:"Error saving conversation"}` 不算成功 | `conversations_update`；mock pre-read/embedded error |
+| POST `/api/convos/update`（仅修改） | `{arg:{conversationId,title}}`；201 conversation；工具 trim 且限制 1024，不静默截断 | 当前 rename handler 要求会话存在且保存 noUpsert；无通用 CAS。MCP 单次 POST、不预读；缺失返回 404 不重试。200/201 嵌入错误或不匹配 ID/title 不算成功 | `conversations_update`；existing-only/404/embedded error |
 | POST `/api/convos/archive` | `{arg:{conversationId,isArchived:boolean}}`；200 conversation | 无 upsert，保留 updatedAt；归档写 archivedAt，取消清空。内部有并发重试，但耗尽可返回相反状态，工具核对 ID/目标值；不停止生成、不删除消息/文件/分享 | `conversations_set_archived`；mock boolean/state verification |
 | POST `/api/convos/pin` | `{arg:{conversationId,pinned:boolean}}`；200 conversation | 无 upsert，保留 updatedAt，无客户端 CAS；核对返回状态 | `conversations_set_pinned`；mock |
 | DELETE `/api/convos` | **仅** `{arg:{conversationId}}`；201 `{acknowledged,deletedCount,messages,conversationIds}` | 必填非空字符串 ID，绝不透传 source/endpoint/thread_id 或批量参数；零删除可成功。级联 owner 子会话、消息、checkpoint、分享等，协调生成/子任务停止；部分失败仍可能已写入。不承诺任意旧 provider 执行均已停止或附件 blob 擦除；上游清理失败标志不能当完整成功 | `conversations_delete`；mock exact body/no bulk/zero count |
@@ -111,6 +112,8 @@ cadence：structured `hourly/daily/weekdays/weekly` + hour/minute/daysOfWeek，�
 
 不提供批量归档/清空、聊天发送/模型生成、任意 conversation 字段 PATCH 或消息正文编辑工具。项目归属使用下节的独立 setter；更多接口仍可显式使用通用请求。
 
+v0.5.0 候选发布源码移除 `conversations_create`：当前审计的 `packages/api/src/conversations/rename.ts` 不支持新 UUID 创建，限定 route 检查未发现等价 metadata-only 创建端点。import/fork/duplicate 不作为兜底，不隐式发送消息或执行 Agent。旧发布历史不代表当前源合同。
+
 ## Chat Projects（v0.3.0）
 
 这里是 `ChatProject` / `chatprojects`，不是旧的 Agent sharing `projects` 集合，也不是 AgentCategory。所有操作 owner-scoped，无管理员跨 owner、共享或角色管理接口。
@@ -119,8 +122,8 @@ cadence：structured `hourly/daily/weekdays/weekly` + hour/minute/daysOfWeek，�
 |---|---|---|---|
 | GET `/api/projects` | `cursor,limit` 默认 25 / 最大 100；sortBy `name/createdAt/lastConversationAt`，sortDirection `asc/desc`，search；`{projects,nextCursor}` | 搜索 name/description 的字面子串、不依赖 Meili；默认活动时间倒序 + ID tie-breaker，无 total；同一遍历保持 search/sort | `projects_list`；mock query/cursor |
 | GET `/api/projects/:projectId` | 直接 project 文档及已存 conversationCount/lastConversationAt/lastConversationId | 不包含会话正文；用 conversations_list 的 projectId 过滤。计数仅含 retention 可见、未归档会话；GET 不刷新统计 | `projects_get`；mock |
-| POST `/api/projects` | `{name,description?}`；201 project；MCP name 非空且 ≤100、description ≤1000，trim 后送出 | 上游会静默截断超长字段，工具提前拒绝；名称不唯一，无幂等键；不支持 instructions/files/agents/members 等字段 | `projects_create`；mock |
-| PATCH `/api/projects/:projectId` | 只发 changes 中 name/description；200 project；description 空串清除 | 部分更新保留其他字段，无客户端 CAS；拒绝空 changes | `projects_update`；mock minimal patch |
+| POST `/api/projects` | MCP `{config}` 原样 body；上游支持 name/description/instructions；201 project | name 必填，长度/归一化/指令类型由上游处理；未知字段可能被忽略。名称不唯一，无幂等键；文件操作另有端点，本轮不新增 | `projects_create`；open config |
+| PATCH `/api/projects/:projectId` | MCP `{projectId,changes:非空JSON}`；支持 name/description/instructions/contextRevision；空串清除 instructions/description | contextRevision 可选，不匹配 409；update 中仅 instructions 实际变化递增，metadata-only 不递增，非通用 metadata CAS；不隐式读版本 | `projects_update`；literal revision/clear instructions |
 | DELETE `/api/projects/:projectId` | 200 `{deletedCount,modifiedCount}` | 删除项目并 unset 所属会话的 chatProjectId；**保留会话、消息、文件、Schedule**。非事务，可能部分成功；Schedule 后续检查可能因 project_deleted 停用，不是即时取消生成 | `projects_delete`；mock no conversation-delete call |
 | PUT `/api/projects/conversations/:conversationId` | `{projectId:ObjectId或null}`；`{conversation,previousProjectId,projectId}` | 移动/归属一个项目，明确 null 解除；必须显式传参，不能因漏填而解除。不改归档状态；无 CAS，统计失败可在归属已写入后返回 500 | `conversations_set_project`；mock move/unlink/missing argument |
 

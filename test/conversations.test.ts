@@ -86,13 +86,10 @@ test('independent indexed search uses only the existing root messages query', as
   assert.match(tools.find((tool) => tool.name === 'librechat_messages_search')!.description!, /Meili.*stale/);
 });
 
-test('create uses one generated UUID through auth replay; title-only update pre-reads and verifies resources', async (t) => {
+test('existing-only rename uses one POST, retains auth replay and rejects missing or malformed responses', async (t) => {
   let mode = 'auth-replay';
   const h = await setup(t, (r, res) => {
-    if (r.method === 'GET') {
-      if (mode === 'missing') { res.statusCode = 404; return { error: 'Conversation not found' }; }
-      return mode === 'wrong-read' ? { conversationId: 'different' } : metadata;
-    }
+    if (mode === 'missing') { res.statusCode = 404; return { error: 'conversation_not_found' }; }
     if (mode === 'auth-replay') { mode = 'ok'; res.statusCode = 401; return {}; }
     res.statusCode = 201;
     if (mode === 'save-error') return { message: 'Error saving conversation' };
@@ -100,39 +97,37 @@ test('create uses one generated UUID through auth replay; title-only update pre-
     if (mode === 'wrong-id') return { ...r.body.arg, conversationId: 'different' };
     return { ...r.body.arg, messages: [], extraField: 'retained' };
   });
-  const created = output(await h.call('conversations_create', { title: '  New chat  ' }));
-  assert.equal(created.status, 201);
-  assert.match(created.data.conversationId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  const renamed = output(await h.call('conversations_update', { conversationId, title: '  New title  ' }));
+  assert.equal(renamed.status, 201);
+  assert.equal(renamed.data.conversationId, conversationId);
   assert.equal(h.seen.length, 2);
   assert.deepEqual(h.seen[0].body, h.seen[1].body);
-  assert.deepEqual(h.last().body, { arg: { conversationId: created.data.conversationId, title: 'New chat' } });
+  assert.deepEqual(h.last().body, { arg: { conversationId, title: 'New title' } });
   assert.ok(h.seen.every((r) => r.method === 'POST' && r.path === '/api/convos/update'));
-  assert.equal(created.data.extraField, 'retained');
+  assert.equal(renamed.data.extraField, 'retained');
   assert.equal((await h.call('conversations_update', { conversationId, title: '  Renamed  ' })).isError, false);
-  assert.equal(h.seen.at(-2)!.method, 'GET');
-  assert.equal(h.seen.at(-2)!.path, '/api/convos/convo%2Fwith%20space');
+  assert.equal(h.seen.length, 3);
   assert.equal(h.last().path, '/api/convos/update');
   assert.deepEqual(h.last().body, { arg: { conversationId, title: 'Renamed' } });
-  for (const failure of ['missing', 'wrong-read']) {
+  for (const failure of ['missing']) {
     mode = failure;
     const before: number = h.seen.length;
     const result = await h.call('conversations_update', { conversationId, title: 'Never sent' });
     assert.equal(result.isError, true);
-    if (mode === 'missing') assert.equal(output(result).error.status, 404);
-    else unexpected(result, false);
+    assert.equal(output(result).error.status, 404);
     assert.equal(h.seen.length, before + 1);
-    assert.equal(h.last().method, 'GET');
+    assert.equal(h.last().method, 'POST'); // No retry/fallback on 404.
   }
   for (const failure of ['save-error', 'wrong-title', 'wrong-id']) {
     mode = failure;
-    for (const name of ['conversations_create', 'conversations_update']) {
-      unexpected(await h.call(name, { title: 'New', ...(name === 'conversations_update' && { conversationId }) }));
-    }
+    unexpected(await h.call('conversations_update', { title: 'New', conversationId }));
   }
   const count = h.seen.length;
-  for (const args of [{ title: 'x', conversationId: 'chosen' }, { title: 'x', model: 'not-allowed' }, { title: 'x'.repeat(1025) }, {}]) {
-    assert.equal((await h.call('conversations_create', args)).isError, true);
+  for (const args of [{ title: 'x', model: 'not-allowed' }, { title: 'x'.repeat(1025) }, {}]) {
+    assert.equal((await h.call('conversations_update', { conversationId, ...args })).isError, true);
   }
+  assert.ok(!(await h.client.listTools()).tools.some((tool) => tool.name === 'librechat_conversations_create'));
+  assert.equal((await h.call('conversations_create', { title: 'Unsupported' })).isError, true);
   assert.equal(h.seen.length, count);
 });
 

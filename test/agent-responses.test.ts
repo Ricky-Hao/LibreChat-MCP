@@ -34,7 +34,7 @@ async function setup(t: TestContext, reply: (r: Seen, res: ServerResponse) => un
 const calls = [
   ['agents_get', { id: agentId }, 'GET', `/api/agents/${agentId}/expanded`],
   ['agents_get', { id: agentId, expanded: false }, 'GET', `/api/agents/${agentId}`],
-  ['agents_create', { provider: 'openAI', model: 'example' }, 'POST', '/api/agents'],
+  ['agents_create', { config: { provider: 'openAI', model: 'example' } }, 'POST', '/api/agents'],
   ['agents_update', { id: agentId, changes: { name: 'renamed' } }, 'PATCH', `/api/agents/${agentId}`],
   ['agents_set_skills', { id: agentId, skills: [skillId], scope: 'selected' }, 'PATCH', `/api/agents/${agentId}`],
 ] as const;
@@ -82,7 +82,7 @@ test('current Agent tools trim only top-level history in actual MCP content, wit
   t.diagnostic(`Synthetic 30-version MCP result, UTF-8 JSON bytes: ${beforeBytes} -> ${afterBytes}; ${(100 * (1 - afterBytes / beforeBytes)).toFixed(2)}% smaller. Not a token/performance measurement.`);
 });
 
-test('parameter merge, Skill/Schedule concurrency fields and Prompt history semantics remain unchanged', async (t) => {
+test('parameter replacement, Skill/Schedule concurrency fields and Prompt history semantics', async (t) => {
   const skill = { _id: skillId, version: 8 };
   const schedule = { id: 'sched_test', configRevision: 2 };
   const prompts = [{ _id: promptId, groupId, prompt: 'version 1' }, { _id: skillId, groupId, prompt: 'version 2' }];
@@ -96,15 +96,15 @@ test('parameter merge, Skill/Schedule concurrency fields and Prompt history sema
   });
   const changes = { model_parameters: { temperature: 0.8 } };
   assert.deepEqual(output(await h.call('agents_update', { id: agentId, changes })).data, current);
-  assert.equal(h.seen.length, 2); // The existing merge pre-read plus one PATCH, no history/read-back fetch.
-  assert.deepEqual(h.seen[1].body, { model_parameters: { ...current.model_parameters, temperature: 0.8 } });
+  assert.equal(h.seen.length, 1); // One PATCH, no merge pre-read or history/read-back fetch.
+  assert.deepEqual(h.seen[0].body, changes);
   assert.deepEqual(output(await h.call('skills_update', { id: skillId, expectedVersion: 7, changes: { body: 'changed' } })).data, skill);
   assert.deepEqual(h.seen.at(-1)!.body, { expectedVersion: 7, body: 'changed' });
   assert.deepEqual(output(await h.call('schedules_update', { id: 'sched_test', expectedConfigRevision: 1, changes: { name: 'changed' } })).data, schedule);
   assert.deepEqual(h.seen.at(-1)!.body, { expectedConfigRevision: 1, name: 'changed' });
   assert.deepEqual(output(await h.call('prompts_list', { groupId })).data, prompts);
   assert.deepEqual(output(await h.call('prompt_groups_get', { groupId })).data, group);
-  assert.equal(h.seen.length, 6);
+  assert.equal(h.seen.length, 5);
 });
 
 test('errors, empty bodies and unexpected shapes keep existing status and diagnostic behavior', async (t) => {

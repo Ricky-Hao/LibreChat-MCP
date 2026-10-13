@@ -1,12 +1,13 @@
 import { z } from 'zod';
-import { objectId, text, page, segment, nonempty, requireResource, readBack, type Tools } from './common.js';
+import { objectId, text, page, segment, requireResource, readBack, type Tools } from './common.js';
 import { ApiError } from '../client.js';
+import { jsonConfigSchema } from './json-config.js';
 
 const groupFields = {
   name: text.min(1).max(255), oneliner: text.max(500).optional(), category: text.max(100).optional(),
   command: text.regex(/^[a-z0-9-]*$/).nullable().optional(),
 };
-const prompt = z.strictObject({ prompt: text.refine((s) => s.trim().length > 0, 'Prompt must not be blank'), type: z.enum(['text', 'chat']) });
+const prompt = jsonConfigSchema().describe('Upstream Prompt revision payload, e.g. prompt/type. Upstream validates content and may strip unknown fields.');
 const record = (data: unknown): data is Record<string, unknown> => !!data && typeof data === 'object' && !Array.isArray(data);
 const hasId = (data: unknown) => record(data) && typeof data._id === 'string';
 
@@ -17,11 +18,11 @@ export const promptsTools: Tools = (tool, api) => {
   tool('prompt_groups_get', 'Read a Prompt group including its productionId (default version).', { groupId: objectId },
     ({ groupId }) => api.request({ path: `/api/prompts/groups/${segment(groupId)}` }), true);
   tool('prompt_groups_create', 'Create a Prompt group with its initial version. Upstream sets that first version as production/default, without public sharing.', {
-    group: z.strictObject(groupFields), prompt,
+    group: z.strictObject(groupFields).describe('Typed creation metadata: upstream currently uses group in database query construction.'), prompt,
   }, async (body) => requireResource(await api.request({ method: 'POST', path: '/api/prompts', body }),
     (data) => record(data) && hasId(data.group) && hasId(data.prompt)));
   tool('prompt_groups_update', 'Patch group metadata only. Does not overwrite Prompt content/history, productionId or permissions. No CAS.', {
-    groupId: objectId, changes: nonempty(z.strictObject(groupFields).partial().shape),
+    groupId: objectId, changes: jsonConfigSchema(true).describe('Group metadata patch; upstream currently strictly validates allowed fields and rejects unknown ones.'),
   }, async ({ groupId, changes }) => requireResource(await api.request({
     method: 'PATCH', path: `/api/prompts/groups/${segment(groupId)}`, body: changes,
   }), hasId));

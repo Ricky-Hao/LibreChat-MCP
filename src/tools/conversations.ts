@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Query } from '../client.js';
 import { ApiError } from '../client.js';
@@ -35,19 +34,9 @@ export const conversationsTools: Tools = (tool, api) => {
     query: z.string().trim().min(1), limit: z.number().int().min(1).max(1000).default(25),
   }, ({ query, limit }) => api.request({ path: '/api/messages', query: { search: query, pageSize: limit } }), true);
 
-  tool('conversations_create', 'Create metadata with a generated UUID and title only. Uses the upstream title-upsert, not a dedicated create-only API; does not generate messages or call a model. Inspect state before retrying an uncertain write.', {
-    title,
-  }, async ({ title }) => {
-    const conversationId = randomUUID();
-    return requireResource(await api.request({ method: 'POST', path: '/api/convos/update', body: { arg: { conversationId, title } } }),
-      (data) => matches(data, conversationId) && record(data) && data.title === title);
-  });
-
-  tool('conversations_update', 'Update only the title. First reads matching owned metadata to reduce accidental creation from a mistyped ID, then uses title-upsert. There is no atomic update-only operation or CAS: deletion between read and write can recreate metadata.', {
+  tool('conversations_update', 'Rename an existing owned conversation only; upstream uses noUpsert and returns 404 for a missing ID. No CAS or pre-read; validates the returned ID and title.', {
     conversationId, title,
   }, async ({ conversationId, title }) => {
-    requireResource(await api.request({ path: `/api/convos/${segment(conversationId)}` }),
-      (data) => matches(data, conversationId), false);
     return requireResource(await api.request({ method: 'POST', path: '/api/convos/update', body: { arg: { conversationId, title } } }),
       (data) => matches(data, conversationId) && record(data) && data.title === title);
   });
